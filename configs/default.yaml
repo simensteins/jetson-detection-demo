@@ -1,0 +1,7 @@
+# v1 demo configuration
+model: yolov8n.pt        # COCO-pretrained nano model (auto-downloads on first run)
+source: data/vtest.avi   # v1b: local file. For v1a, set an rtsp:// URL (or pass --source)
+conf: 0.25               # confidence threshold
+imgsz: 640               # inference resolution
+display: true            # show the annotated window on the Jetson's monitor
+max_frames: 0            # 0 = run to end of source; set e.g. 600 to cap a profiling run

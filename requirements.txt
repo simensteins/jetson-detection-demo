@@ -1,0 +1,8 @@
+# Install on the Jetson.
+# IMPORTANT: torch + torchvision must come from NVIDIA's Jetson wheels matching
+# your JetPack version, NOT PyPI (PyPI torch has no CUDA for Tegra). See README.
+ultralytics>=8.3.0
+pyyaml
+# OpenCV: prefer the system build shipped with JetPack (has GStreamer for RTSP).
+#   check with:  python3 -c "import cv2; print(cv2.__version__)"
+#   only if missing:  pip install opencv-python
