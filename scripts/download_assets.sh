@@ -7,6 +7,6 @@ mkdir -p data
 # class). Swap in traffic footage from pexels.com/videos for cars, etc.
 if [ ! -f data/vtest.avi ]; then
   curl -L -o data/vtest.avi \
-    https://github.com/opencv/opencv/raw/master/samples/data/vtest.avi
+    https://raw.githubusercontent.com/opencv/opencv/5.x/samples/data/vtest.avi
 fi
 echo "assets ready in data/"
