@@ -23,6 +23,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--source", default=None,
                    help="Override source: file path, rtsp:// URL, or webcam index")
     p.add_argument("--no-display", action="store_true", help="Run headless (no window)")
+    p.add_argument("--max-frames", type=int, default=None,
+                   help="Override max_frames from config (0 = run to end of source)")
     return p.parse_args()
 
 
@@ -39,7 +41,7 @@ def main() -> None:
     display = cfg.get("display", True) and not args.no_display
     conf = cfg.get("conf", 0.25)
     imgsz = cfg.get("imgsz", 640)
-    max_frames = cfg.get("max_frames", 0)  # 0 = run until the source ends / 'q'
+    max_frames = args.max_frames if args.max_frames is not None else cfg.get("max_frames", 0)
 
     model = YOLO(cfg["model"])  # weights auto-download on first run
     cap = open_source(source)
