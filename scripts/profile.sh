@@ -8,9 +8,11 @@ stamp=$(date +%Y%m%d_%H%M%S)
 out="reports/v1_${stamp}"
 
 # --duration bounds the capture so the report stays a sensible size.
-# --trace=cuda,nvtx captures GPU work plus our decode/inference/draw ranges.
+# --trace=nvtx only (no cuda): tracing cuda hangs on this JetPack/nsys combo
+# in GpuTicksConverter during report export. NVTX still gives the
+# decode/inference/draw/display range breakdown we actually care about.
 nsys profile \
-  --trace=cuda,nvtx \
+  --trace=nvtx \
   --duration=20 \
   --force-overwrite true \
   -o "${out}" \
