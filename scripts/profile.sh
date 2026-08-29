@@ -14,6 +14,6 @@ nsys profile \
   --duration=20 \
   --force-overwrite true \
   -o "${out}" \
-  python -m src.detect --config configs/default.yaml --no-display
+  python -m src.detect --config configs/default.yaml --no-display "$@"
 
 echo "wrote ${out}.nsys-rep"
