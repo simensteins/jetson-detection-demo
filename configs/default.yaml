@@ -5,3 +5,4 @@ conf: 0.25 # confidence threshold
 imgsz: 640 # inference resolution
 display: true # show the annotated window on the Jetson's monitor
 max_frames: 0 # 0 = run to end of source; set e.g. 600 to cap a profiling run
+warmup_frames: 0 # frames to exclude from the FPS timer (CUDA/TensorRT warm-up)

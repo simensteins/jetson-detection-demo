@@ -25,6 +25,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--no-display", action="store_true", help="Run headless (no window)")
     p.add_argument("--max-frames", type=int, default=None,
                    help="Override max_frames from config (0 = run to end of source)")
+    p.add_argument("--warmup-frames", type=int, default=None,
+                   help="Frames to exclude from the FPS timer (CUDA/TensorRT warm-up)")
     return p.parse_args()
 
 
@@ -42,6 +44,8 @@ def main() -> None:
     conf = cfg.get("conf", 0.25)
     imgsz = cfg.get("imgsz", 640)
     max_frames = args.max_frames if args.max_frames is not None else cfg.get("max_frames", 0)
+    warmup_frames = (args.warmup_frames if args.warmup_frames is not None
+                      else cfg.get("warmup_frames", 0))
 
     model = YOLO(cfg["model"])  # weights auto-download on first run
     cap = open_source(source)
@@ -49,6 +53,7 @@ def main() -> None:
         raise SystemExit(f"Could not open source: {source!r}")
 
     frames = 0
+    timed_frames = 0
     t0 = time.perf_counter()
     try:
         while True:
@@ -70,6 +75,11 @@ def main() -> None:
                         break
 
             frames += 1
+            if frames <= warmup_frames:
+                if frames == warmup_frames:
+                    t0 = time.perf_counter()  # discard warm-up from the FPS timer
+            else:
+                timed_frames += 1
             if max_frames and frames >= max_frames:
                 break
     finally:
@@ -77,8 +87,11 @@ def main() -> None:
         cv2.destroyAllWindows()
 
     dt = time.perf_counter() - t0
-    if frames:
-        print(f"processed {frames} frames in {dt:.1f}s  ->  {frames / dt:.1f} FPS")
+    if timed_frames:
+        note = f" (after {warmup_frames}-frame warm-up)" if warmup_frames else ""
+        print(f"processed {timed_frames} frames in {dt:.1f}s{note}  ->  {timed_frames / dt:.1f} FPS")
+    elif frames:
+        print(f"processed {frames} frames, all within the {warmup_frames}-frame warm-up  ->  no timed FPS")
 
 
 if __name__ == "__main__":
