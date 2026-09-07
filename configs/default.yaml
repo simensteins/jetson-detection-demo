@@ -1,5 +1,5 @@
 # v1 demo configuration
-model: yolov8n.engine # COCO-pretrained nano model (auto-downloads on first run)
+model: yolov8n.pt # COCO-pretrained nano model (auto-downloads on first run)
 source: data/vtest.avi # v1b: local file. For v1a, set an rtsp:// URL (or pass --source)
 conf: 0.25 # confidence threshold
 imgsz: 640 # inference resolution
