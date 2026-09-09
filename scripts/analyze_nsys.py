@@ -160,13 +160,19 @@ def main() -> None:
 
     total_mean = means["total_us"]
     print(f"\n=== Share of total inference time (mean total = {total_mean:.2f}us) ===")
-    for k, label in [("kernel_time_us", "GPU kernel execution"),
+    print("--- non-overlapping partition (sums to ~100%) ---")
+    for k, label in [("pre_kernel_us", "Pre-kernel (Python/setup)"),
+                      ("kernel_time_us", "GPU kernel execution"),
                       ("idle_gap_us", "GPU idle gaps between kernels"),
-                      ("runtime_us", "CUDA Runtime API dispatch"),
-                      ("sync_us", "Synchronization"),
-                      ("memcpy_us", "Memcpy"), ("memset_us", "Memset"),
-                      ("pre_kernel_us", "Pre-kernel (Python/setup)"),
                       ("post_kernel_us", "Post-kernel (Python/postproc)")]:
+        pct = 100.0 * means[k] / total_mean
+        print(f"{label:32s} {means[k]:9.2f}us  ({pct:5.1f}%)")
+    print("--- overlapping CUPTI event categories (do NOT add to the above -")
+    print("    these measure CPU-thread activity that coincides in time with")
+    print("    GPU idle gaps and/or kernel execution already counted above) ---")
+    for k, label in [("runtime_us", "CUDA Runtime API dispatch"),
+                      ("sync_us", "Synchronization"),
+                      ("memcpy_us", "Memcpy"), ("memset_us", "Memset")]:
         pct = 100.0 * means[k] / total_mean
         print(f"{label:32s} {means[k]:9.2f}us  ({pct:5.1f}%)")
 
