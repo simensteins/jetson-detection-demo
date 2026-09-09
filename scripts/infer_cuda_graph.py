@@ -52,7 +52,7 @@ import numpy as np
 import tensorrt as trt
 import torch
 import yaml
-from ultralytics.utils.ops import non_max_suppression
+from ultralytics.utils.nms import non_max_suppression
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.profiling import nvtx_range  # noqa: E402
