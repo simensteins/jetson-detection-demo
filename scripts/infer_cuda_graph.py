@@ -6,35 +6,34 @@ NVTX ranges, same CLI flags) so it can be profiled and compared against the
 baseline with the exact same methodology (nsys + scripts/analyze_nsys.py).
 
 The ONLY thing this changes versus the baseline: how the TensorRT engine
-gets invoked. The baseline goes through Ultralytics' model.predict(), which
-issues ~223 individual CUDA API calls per frame (measured: ~8.1-8.4ms of
-CPU-side dispatch overhead, ~30% GPU idle time between kernels - see the
+gets invoked per frame. The baseline goes through Ultralytics' model.predict()
+every frame, which issues ~223 individual CUDA API calls (measured: ~8.1-8.4ms
+of CPU-side dispatch overhead, ~30% GPU idle time between kernels - see the
 "Baseline Performance" Notion page). This script captures that same
 223-kernel forward pass into a CUDA graph once, then replays it with a
-single call per frame, to test whether that collapses the dispatch
-overhead and idle gaps.
+single call per frame, to test whether that collapses the dispatch overhead
+and idle gaps.
 
-Everything else - preprocessing (letterbox + normalize) and postprocessing
-(NMS) - deliberately reuses Ultralytics' own ops.non_max_suppression rather
-than a hand-rolled reimplementation, to keep this a single-variable
-comparison against the baseline rather than a from-scratch reimplementation
-with its own correctness risk.
+Implementation note: an earlier version of this script re-deserialized the
+.engine file itself via a raw trt.Runtime().deserialize_cuda_engine() call.
+That failed with a "dispatch runtime" magic-tag mismatch even on a freshly
+rebuilt engine, while Ultralytics' own AutoBackend loaded the identical file
+fine - a narrow TensorRT 10.x API quirk that wasn't worth chasing further.
+Instead, this version lets Ultralytics do the (working) loading, then reuses
+its AutoBackend's already-initialized IExecutionContext and pre-allocated,
+fixed-address I/O tensors (backend.context, backend.bindings) directly for
+CUDA graph capture. Only the engine-invocation mechanism differs from the
+baseline - preprocessing and postprocessing still go through Ultralytics'
+own code paths (backend.bindings tensors, ops.non_max_suppression), keeping
+this a single-variable comparison rather than a from-scratch reimplementation.
 
 Requirements / assumptions - verify these before trusting results:
   - configs/default.yaml's `model` must point at a .engine file (not .pt).
-  - The engine must have a STATIC input shape (fixed batch=1, fixed imgsz) -
-    true for every export used in this project so far. Dynamic-shape
-    engines are not supported by this script.
-  - Assumes the engine emits raw (pre-NMS) predictions, i.e. it was NOT
-    exported with end2end=True bundling NMS into the engine. This matches
-    the baseline engine used for all profiling on the Notion baseline page
-    (no NMS-named kernels appear in its ncu/nsys kernel traces). If you
-    later profile an end2end=True engine with this script, postprocessing
-    here is wrong and needs to be skipped/adjusted.
+  - The engine must have a STATIC input shape (fixed batch=1, fixed imgsz).
+  - Assumes the engine emits raw (pre-NMS) predictions (end2end=False export,
+    matching the baseline engine used throughout this project).
   - Recommend a first run WITH display (drop --no-display) to visually
-    confirm detections look correct before trusting any profiling numbers
-    - this isolates "is the raw TensorRT invocation correct" from "does
-    the CUDA graph layer change anything," verified independently.
+    confirm detections look correct before trusting any profiling numbers.
 
 Usage (run from anywhere - the project root is added to sys.path below):
     python3 scripts/infer_cuda_graph.py --config configs/default.yaml \
@@ -49,16 +48,14 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-import tensorrt as trt
 import torch
 import yaml
+from ultralytics import YOLO
 from ultralytics.utils.nms import non_max_suppression
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.profiling import nvtx_range  # noqa: E402
 from src.sources import open_source  # noqa: E402
-
-TRT_LOGGER = trt.Logger(trt.Logger.WARNING)
 
 
 def parse_args() -> argparse.Namespace:
@@ -78,35 +75,6 @@ def parse_args() -> argparse.Namespace:
 def load_config(path: str) -> dict:
     with open(path) as f:
         return yaml.safe_load(f)
-
-
-def load_engine(engine_path: str) -> trt.ICudaEngine:
-    runtime = trt.Runtime(TRT_LOGGER)
-    with open(engine_path, "rb") as f:
-        engine = runtime.deserialize_cuda_engine(f.read())
-    if engine is None:
-        raise SystemExit(f"Failed to load TensorRT engine: {engine_path}")
-    return engine
-
-
-def find_io_tensors(engine: trt.ICudaEngine) -> tuple[str, str]:
-    """Return (input_name, output_name), found by IO mode rather than
-    assuming index order."""
-    input_name = output_name = None
-    for i in range(engine.num_io_tensors):
-        name = engine.get_tensor_name(i)
-        mode = engine.get_tensor_mode(name)
-        if mode == trt.TensorIOMode.INPUT:
-            input_name = name
-        elif mode == trt.TensorIOMode.OUTPUT:
-            output_name = name
-    if input_name is None or output_name is None:
-        raise SystemExit(
-            f"Expected exactly one input and one output tensor, "
-            f"found input={input_name!r} output={output_name!r}. "
-            "This script doesn't support multi-input/output engines."
-        )
-    return input_name, output_name
 
 
 def letterbox(frame: np.ndarray, new_shape: int, color=(114, 114, 114)):
@@ -172,32 +140,31 @@ def main() -> None:
             "Point configs/default.yaml's 'model' at the exported .engine file."
         )
 
-    print(f"Loading engine: {engine_path}")
-    engine = load_engine(engine_path)
-    context = engine.create_execution_context()
-    input_name, output_name = find_io_tensors(engine)
-    input_shape = tuple(engine.get_tensor_shape(input_name))
-    output_shape = tuple(engine.get_tensor_shape(output_name))
-    print(f"  input  {input_name!r} shape={input_shape}")
-    print(f"  output {output_name!r} shape={output_shape}")
-    if any(d < 0 for d in input_shape):
-        raise SystemExit(
-            f"Engine has a dynamic input shape {input_shape} - this script "
-            "requires a static-shape engine (fixed batch size and imgsz)."
-        )
+    print(f"Loading {engine_path} via Ultralytics (known-working path)...")
+    yolo = YOLO(engine_path)
+    # YOLO() is lazy - force AutoBackend initialization with a dummy predict.
+    yolo.predict(np.zeros((imgsz, imgsz, 3), dtype=np.uint8), verbose=False)
+    backend = yolo.predictor.model  # ultralytics.nn.autobackend.AutoBackend
+
+    context = backend.context  # already-initialized IExecutionContext
+    bindings = backend.bindings  # OrderedDict[name] -> Binding(name, dtype, shape, data)
+    input_name = "images"
+    output_name = backend.output_names[0]
+    input_buf = bindings[input_name].data  # fixed-address CUDA tensor
+    output_buf = bindings[output_name].data  # fixed-address CUDA tensor
+    print(f"  input  {input_name!r} shape={tuple(input_buf.shape)}")
+    print(f"  output {output_name!r} shape={tuple(output_buf.shape)}")
 
     cap = open_source(source)
     if not cap.isOpened():
         raise SystemExit(f"Could not open source: {source!r}")
 
     stream = torch.cuda.Stream()
-    input_buf = torch.zeros(input_shape, dtype=torch.float32, device="cuda")
-    output_buf = torch.zeros(output_shape, dtype=torch.float32, device="cuda")
     context.set_tensor_address(input_name, input_buf.data_ptr())
     context.set_tensor_address(output_name, output_buf.data_ptr())
 
-    # --- engine/graph warm-up: at least one uncaptured execute is required
-    # by TensorRT before graph capture (flushes any deferred setup work) ---
+    # --- warm-up: at least one uncaptured execute is required by TensorRT
+    # before graph capture (flushes any deferred setup work) ---
     ok, frame0 = cap.read()
     if not ok:
         raise SystemExit("Could not read a frame to warm up the engine.")
