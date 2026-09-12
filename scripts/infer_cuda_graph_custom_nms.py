@@ -191,13 +191,16 @@ def custom_nms(raw_output: torch.Tensor, conf_thres: float, iou_thres: float) ->
     return torch.cat([boxes_xyxy, final_scores.unsqueeze(1), topk_classes.float().unsqueeze(1)], dim=1)
 
 
-def draw_detections(frame: np.ndarray, dets: torch.Tensor,
+def draw_detections(frame: np.ndarray, dets_cpu: np.ndarray,
                      scale: float, pad: tuple[int, int]) -> np.ndarray:
+    """dets_cpu: (MAX_CANDIDATES, 6) numpy array, already transferred off
+    the GPU by the caller (single sync there) - everything here is plain
+    CPU/numpy so it can't reintroduce per-op GPU dispatch overhead."""
     annotated = frame.copy()
-    valid = dets[dets[:, 4] > 0]  # cheap, fixed-size-K CPU-side filter of suppressed/padding entries
+    valid = dets_cpu[dets_cpu[:, 4] > 0]  # cheap CPU-side filter, no GPU sync
     if len(valid) == 0:
         return annotated
-    boxes = valid[:, :4].clone()
+    boxes = valid[:, :4].copy()
     boxes[:, [0, 2]] -= pad[0]
     boxes[:, [1, 3]] -= pad[1]
     boxes /= scale
@@ -297,9 +300,13 @@ def main() -> None:
                 graph.replay()
                 stream.synchronize()
                 preds = custom_nms(output_buf, conf_thres=conf, iou_thres=args.iou)
+                # Single GPU->CPU sync of the fixed (MAX_CANDIDATES, 6) tensor
+                # here, inside "inference" - not one sync per op scattered
+                # through draw_detections (see its docstring).
+                preds_cpu = preds.cpu().numpy()
 
             with nvtx_range("draw"):
-                annotated = draw_detections(frame, preds, scale, pad_left_top)
+                annotated = draw_detections(frame, preds_cpu, scale, pad_left_top)
 
             if display:
                 with nvtx_range("display"):
