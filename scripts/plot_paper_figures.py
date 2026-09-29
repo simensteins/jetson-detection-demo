@@ -200,10 +200,11 @@ def plot_dispatch_time(outdir: Path) -> None:
 def extract_frame_timeline(dbname: str, frame_offset: int = 100):
     """Pulls every GPU kernel and every CPU-side CUDA API call within one
     frame's `inference` NVTX span (the frame at index `frame_offset`, well
-    past warm-up), timestamped relative to that frame's first TensorRT model
-    kernel (`_trt`-suffixed - see the project's kernel-name-anchoring
-    convention used throughout the nsys analysis). Returns (kernels, calls),
-    each a list of (start_us, end_us[, name]) tuples."""
+    past warm-up), timestamped relative to that NVTX span's own start (not
+    the first model kernel) - so any pre-kernel gap (CPU-only preprocessing
+    in Baseline/Iteration 1, or the real GPU preprocessing kernels in
+    Iteration 2/3) shows up honestly instead of being cropped out. Returns
+    (kernels, calls), each a list of (start_us, end_us[, name]) tuples."""
     con = sqlite3.connect(dbname)
     cur = con.cursor()
     cur.execute(
@@ -211,12 +212,7 @@ def extract_frame_timeline(dbname: str, frame_offset: int = 100):
         (frame_offset,),
     )
     inf_start, inf_end = cur.fetchone()
-    cur.execute(
-        """SELECT k.start FROM CUPTI_ACTIVITY_KIND_KERNEL k JOIN StringIds s ON k.shortName = s.id
-           WHERE k.start >= ? AND k.start <= ? AND s.value LIKE '%_trt' ORDER BY k.start LIMIT 1""",
-        (inf_start, inf_end),
-    )
-    t0 = cur.fetchone()[0]
+    t0 = inf_start
 
     cur.execute(
         """SELECT k.start - ?, k.end - ? FROM CUPTI_ACTIVITY_KIND_KERNEL k
@@ -236,39 +232,52 @@ def extract_frame_timeline(dbname: str, frame_offset: int = 100):
     return kernels, calls
 
 
+SWIMLANE_REPORTS = [
+    ("baseline_localfile_2.sqlite", "Baseline – individually dispatched (model.predict())"),
+    ("cuda_graph_iteration_2.sqlite", "Iteration 1 – + captured CUDA Graph"),
+    ("cuda_graph_gpu_resize_iteration_1.sqlite", "Iteration 2 – + GPU preprocessing"),
+    ("cuda_graph_custom_nms_2.sqlite", "Iteration 3 – + custom fixed-shape NMS"),
+]
+
+
 def plot_swimlane(outdir: Path, reports_dir: Path) -> None:
-    baseline_db = reports_dir / "baseline_localfile_2.sqlite"
-    iter1_db = reports_dir / "cuda_graph_iteration_2.sqlite"
-    if not baseline_db.exists() or not iter1_db.exists():
-        print(f"  [skip] swimlane figure needs {baseline_db.name} and {iter1_db.name} in {reports_dir}/")
+    missing = [f for f, _ in SWIMLANE_REPORTS if not (reports_dir / f).exists()]
+    if missing:
+        print(f"  [skip] swimlane figure needs {missing} in {reports_dir}/")
         return
 
-    base_kernels, base_calls = extract_frame_timeline(str(baseline_db))
-    graph_kernels, graph_calls = extract_frame_timeline(str(iter1_db))
+    panels = []
+    for fname, title in SWIMLANE_REPORTS:
+        kernels, calls = extract_frame_timeline(str(reports_dir / fname))
+        panels.append((kernels, calls, title))
 
-    fig, (ax_top, ax_bot) = plt.subplots(2, 1, figsize=(7.5, 4.9), sharex=False)
+    # One shared x-axis limit across all four panels - this is what makes the
+    # compression across iterations honestly comparable at a glance, instead
+    # of each panel silently rescaling to its own busiest stretch.
+    x_max = max(k[-1][1] for k, _, _ in panels) * 1.02
 
-    for ax, kernels, calls, title, span_note in [
-        (ax_top, base_kernels, base_calls,
-         "Baseline – individually dispatched (model.predict())",
-         f"{len(base_kernels)} kernels across {base_kernels[-1][1]:.0f}μs"),
-        (ax_bot, graph_kernels, graph_calls,
-         "Iteration 1 – captured CUDA Graph, replayed",
-         f"{len(graph_kernels)} kernels across {graph_kernels[-1][1]:.0f}μs"),
-    ]:
+    fig, axes = plt.subplots(4, 1, figsize=(7.5, 9.4), sharex=True)
+
+    for ax, (kernels, calls, title) in zip(axes, panels):
         gpu_spans = [(s, e - s) for s, e in kernels]
         ax.broken_barh(gpu_spans, (0, 8), facecolors=BLUE, edgecolors="none", zorder=3)
 
-        # Split CPU-side events by what they actually mean: a *dispatch* call
-        # (cudaLaunchKernel, cudaGraphLaunch, cudaMemcpyAsync, ...) is brief,
-        # active CPU work; cudaStreamSynchronize/cudaDeviceSynchronize is the
-        # CPU BLOCKED, waiting on the GPU - the opposite of dispatch overhead.
-        # Rendering both the same way would visually claim the CPU is "busy"
-        # during a multi-millisecond wait, which is exactly backwards - so
-        # they get distinct styles.
-        min_width = kernels[-1][1] * 0.0015
-        dispatch = [(s, max(e - s, min_width)) for s, e, n in calls if "Synchronize" not in n]
-        waiting = [(s, e - s) for s, e, n in calls if "Synchronize" in n]
+        # Split CPU-side events by what they actually mean. Classifying by
+        # call NAME (e.g. "is it a *Synchronize call?") turns out to be
+        # wrong: Iteration 3's real blocking wait is a long cudaMemcpyAsync
+        # (the .cpu() transfer), not a Synchronize call, while cudaGraphLaunch
+        # itself legitimately takes ~500-660us to issue (real, active
+        # dispatch work, not a wait). Across all four reports there's a clean
+        # gap in observed durations - every genuine dispatch-type call
+        # (cudaLaunchKernel, cudaGraphLaunch, a normal H2D memcpy) finishes
+        # under ~660us, while every genuine blocking wait (cudaStreamSynchronize
+        # in Baseline/1/2, the blocking .cpu() memcpy in Iteration 3) runs
+        # >=1190us - so duration, not the API name, is what actually
+        # distinguishes "CPU doing work" from "CPU idle, waiting on GPU" here.
+        WAIT_THRESHOLD_US = 1000.0
+        min_width = x_max * 0.0015
+        dispatch = [(s, max(e - s, min_width)) for s, e, _ in calls if (e - s) <= WAIT_THRESHOLD_US]
+        waiting = [(s, e - s) for s, e, _ in calls if (e - s) > WAIT_THRESHOLD_US]
         ax.broken_barh(dispatch, (14, 8), facecolors=ORANGE, edgecolors="none", zorder=3)
         if waiting:
             ax.broken_barh(waiting, (14, 8), facecolors="none", edgecolors=MUTED,
@@ -277,8 +286,8 @@ def plot_swimlane(outdir: Path, reports_dir: Path) -> None:
         ax.set_yticks([4, 18])
         ax.set_yticklabels(["GPU\n(kernels)", "CPU\n(API calls)"])
         ax.set_ylim(-2, 26)
-        ax.set_xlim(0, kernels[-1][1] * 1.02)
-        ax.set_xlabel("Time since first model kernel (μs)")
+        ax.set_xlim(0, x_max)
+        span_note = f"{len(kernels)} kernels across {kernels[-1][1]:.0f}μs"
         ax.set_title(f"{title}\n{span_note}", fontsize=9.5, loc="left")
         ax.grid(axis="x", color=GRID_COLOR, linewidth=0.7, zorder=0)
         ax.set_axisbelow(True)
@@ -287,15 +296,17 @@ def plot_swimlane(outdir: Path, reports_dir: Path) -> None:
         ax.spines["bottom"].set_color(MUTED)
         ax.tick_params(colors=MUTED, length=3)
 
+    axes[-1].set_xlabel("Time since frame's `inference` NVTX start (μs)")
+
     legend_handles = [
         plt.Rectangle((0, 0), 1, 1, facecolor=BLUE, edgecolor="none", label="GPU kernel executing"),
         plt.Rectangle((0, 0), 1, 1, facecolor=ORANGE, edgecolor="none", label="CPU dispatching (active)"),
         plt.Rectangle((0, 0), 1, 1, facecolor="none", edgecolor=MUTED, hatch="////", label="CPU blocked, waiting on GPU"),
     ]
     fig.legend(handles=legend_handles, loc="lower center", ncol=3, frameon=False,
-               fontsize=8.5, bbox_to_anchor=(0.5, -0.02))
-    fig.suptitle("Where the kernel-dispatch gaps go: one real frame, to scale", fontsize=11, y=1.01)
-    fig.tight_layout(rect=(0, 0.03, 1, 1))
+               fontsize=8.5, bbox_to_anchor=(0.5, -0.01))
+    fig.suptitle("Where the kernel-dispatch gaps go: one real frame, to scale, all four iterations", fontsize=11, y=1.005)
+    fig.tight_layout(rect=(0, 0.025, 1, 1))
     save(fig, outdir, "05_cpu_gpu_swimlane")
 
 
