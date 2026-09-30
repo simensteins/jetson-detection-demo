@@ -1,13 +1,22 @@
-# Install on the Jetson.
-# IMPORTANT: torch + torchvision must come from NVIDIA's Jetson wheels matching
-# your JetPack version, NOT PyPI (PyPI torch has no CUDA for Tegra). See README.
+# Install on the Jetson, inside the activated .venv.
+# IMPORTANT: torch + torchvision are deliberately NOT listed here - they must never be
+# (re)installed from this file. They have to be CUDA builds that run on the Jetson
+# (NOT the CPU-only PyPI default); this project's .venv has torch 2.13.0+cu130. See README.
+# Check first that pip won't touch torch ("Would install" must not list torch/torchvision):
+#   pip install --dry-run -r requirements.txt
 ultralytics>=8.3.0
-# RF-DETR (optional, only for configs/rfdetr.yaml + scripts/*rfdetr*). Install with
-# --no-deps first on the Jetson so pip can't replace the Jetson torch wheels, then
-# add whatever it reports missing - see README (RF-DETR section).
-#   pip install --no-deps rfdetr
-#   pip install "rfdetr[onnxexport]"   # only where you run scripts/export_rfdetr.py
 pyyaml
+# RF-DETR (configs/rfdetr.yaml + scripts/*rfdetr*). Pinned to the set that works in the
+# Jetson .venv (2026-09-30) - newer releases broke the install:
+rfdetr==1.11.1
+transformers==5.17.0     # rfdetr needs >=5.1,<6
+huggingface_hub==1.33.0  # transformers 5 needs >=1.5,<2 (2.0 breaks it)
+tokenizers==0.23.2
+safetensors==0.8.0
+pyDeprecate==0.9.0       # rfdetr needs >=0.9,<0.10
+supervision==0.30.6
+# ONNX export extras - only where you run scripts/export_rfdetr.py (not pinned yet):
+#   pip install "rfdetr[onnxexport]"
 # OpenCV: prefer the system build shipped with JetPack (has GStreamer for RTSP).
 #   check with:  python3 -c "import cv2; print(cv2.__version__)"
 #   only if missing:  pip install opencv-python

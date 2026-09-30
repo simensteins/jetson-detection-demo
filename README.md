@@ -63,10 +63,15 @@ The same pipeline can run Roboflow's RF-DETR (a DETR-style transformer
 detector) instead of YOLO, so the two can be compared under identical
 conditions. `configs/rfdetr.yaml` is `default.yaml` with `model: rfdetr-nano`.
 
-Install (on the Jetson): `pip install --no-deps rfdetr`, then install what
-`python3 -c "import rfdetr"` reports missing. Plain `pip install rfdetr` may
-replace the Jetson torch/torchvision wheels with CPU-only PyPI builds, so
-check `python3 -c "import torch; print(torch.cuda.is_available())"` afterwards.
+Install (on the Jetson, in the activated `.venv`): the RF-DETR packages are
+pinned in `requirements.txt` to a set known to work together (newer
+transformers/huggingface_hub/pyDeprecate releases break it). Check first that
+pip won't replace the Jetson torch/torchvision with CPU-only PyPI builds:
+```
+pip install --dry-run -r requirements.txt   # torch/torchvision must not be under "Would install"
+pip install -r requirements.txt
+python3 -c "import rfdetr, torch; print(torch.__version__, torch.cuda.is_available())"   # must print True
+```
 
 **Baseline** (PyTorch, rfdetr's own `predict()`), same NVTX ranges as YOLO:
 ```
