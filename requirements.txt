@@ -2,6 +2,11 @@
 # IMPORTANT: torch + torchvision must come from NVIDIA's Jetson wheels matching
 # your JetPack version, NOT PyPI (PyPI torch has no CUDA for Tegra). See README.
 ultralytics>=8.3.0
+# RF-DETR (optional, only for configs/rfdetr.yaml + scripts/*rfdetr*). Install with
+# --no-deps first on the Jetson so pip can't replace the Jetson torch wheels, then
+# add whatever it reports missing - see README (RF-DETR section).
+#   pip install --no-deps rfdetr
+#   pip install "rfdetr[onnxexport]"   # only where you run scripts/export_rfdetr.py
 pyyaml
 # OpenCV: prefer the system build shipped with JetPack (has GStreamer for RTSP).
 #   check with:  python3 -c "import cv2; print(cv2.__version__)"

@@ -1,4 +1,7 @@
-"""v1 object-detection demo: read a video source, run YOLO, draw boxes, display.
+"""v1 object-detection demo: read a video source, run a detector, draw boxes, display.
+
+The detector is YOLO (Ultralytics) by default, or RF-DETR when config `model`
+is an "rfdetr-<size>" name (see src/detectors.py and configs/rfdetr.yaml).
 
 Each frame's work is wrapped in NVTX ranges (decode / inference / draw /
 display) so an Nsight Systems timeline splits into readable phases instead of
@@ -11,14 +14,14 @@ import time
 
 import cv2
 import yaml
-from ultralytics import YOLO
 
+from .detectors import load_detector
 from .profiling import nvtx_range
 from .sources import open_source
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Jetson YOLO detection demo (v1)")
+    p = argparse.ArgumentParser(description="Jetson detection demo (v1): YOLO or RF-DETR")
     p.add_argument("--config", default="configs/default.yaml", help="YAML config path")
     p.add_argument("--source", default=None,
                    help="Override source: file path, rtsp:// URL, or webcam index")
@@ -47,7 +50,7 @@ def main() -> None:
     warmup_frames = (args.warmup_frames if args.warmup_frames is not None
                       else cfg.get("warmup_frames", 0))
 
-    model = YOLO(cfg["model"])  # weights auto-download on first run
+    detector = load_detector(cfg["model"], conf, imgsz)  # weights auto-download on first run
     cap = open_source(source)
     if not cap.isOpened():
         raise SystemExit(f"Could not open source: {source!r}")
@@ -63,10 +66,10 @@ def main() -> None:
                 break
 
             with nvtx_range("inference"):
-                results = model.predict(frame, conf=conf, imgsz=imgsz, verbose=False)
+                results = detector.infer(frame)
 
             with nvtx_range("draw"):
-                annotated = results[0].plot()
+                annotated = detector.draw(frame, results)
 
             if display:
                 with nvtx_range("display"):

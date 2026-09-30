@@ -11,6 +11,7 @@ swapped for the real (prod) pipeline.
 ├── configs/default.yaml     # source, model, thresholds — the one file you edit
 ├── src/
 │   ├── detect.py            # entrypoint: source -> detect -> draw -> display
+│   ├── detectors.py         # model backends: YOLO (Ultralytics) or RF-DETR
 │   ├── sources.py           # file / rtsp / webcam -> cv2.VideoCapture
 │   └── profiling.py         # NVTX ranges (no-op when CUDA torch absent)
 ├── scripts/
@@ -55,6 +56,36 @@ On the **Mac**: `mediamtx` in one terminal, then
 `bash scripts/rtsp_server_mac.sh yourfile.mp4` in another.
 On the **Jetson**: set `source: rtsp://192.168.55.100:8554/demo` in the config
 (or `--source`), then run `python -m src.detect`.
+
+## RF-DETR
+
+The same pipeline can run Roboflow's RF-DETR (a DETR-style transformer
+detector) instead of YOLO, so the two can be compared under identical
+conditions. `configs/rfdetr.yaml` is `default.yaml` with `model: rfdetr-nano`.
+
+Install (on the Jetson): `pip install --no-deps rfdetr`, then install what
+`python3 -c "import rfdetr"` reports missing. Plain `pip install rfdetr` may
+replace the Jetson torch/torchvision wheels with CPU-only PyPI builds, so
+check `python3 -c "import torch; print(torch.cuda.is_available())"` afterwards.
+
+**Baseline** (PyTorch, rfdetr's own `predict()`), same NVTX ranges as YOLO:
+```
+python -m src.detect --config configs/rfdetr.yaml
+bash scripts/profile.sh --config configs/rfdetr.yaml   # later --config wins
+```
+
+**Optimized** (TensorRT + CUDA graph + GPU pre/postprocessing, i.e. the RF-DETR
+version of Iterations 1-4):
+```
+python3 scripts/export_rfdetr.py --size nano --precision fp32   # -> models/rfdetr-nano_fp32.engine
+python3 scripts/export_rfdetr.py --size nano --precision fp16   # -> models/rfdetr-nano_fp16.engine
+python3 scripts/infer_rfdetr_trt.py --engine models/rfdetr-nano_fp16.engine --no-display --max-frames 600
+```
+The ONNX export step can run on another machine (`--onnx-only`, then
+`--onnx <file>` on the Jetson); the engine build must run on the Jetson.
+RF-DETR has no NMS, uses a plain resize (no letterbox), and its input
+resolution is fixed by the model size (nano = 384). See the docstring of
+`scripts/infer_rfdetr_trt.py` for what differs from YOLO.
 
 ## Profile
 
