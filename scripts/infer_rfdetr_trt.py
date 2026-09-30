@@ -30,9 +30,27 @@ The engine is built by scripts/export_rfdetr.py (ONNX -> trtexec). It's
 deserialized directly with the TensorRT Python API rather than through
 Ultralytics' AutoBackend, since Ultralytics doesn't load RF-DETR.
 
+Stage flags - so the iterations can be measured one at a time, the same
+single-variable way as for YOLO (defaults = everything on):
+
+    --no-graph --preprocess cpu   TensorRT baseline: engine executed eagerly every
+                                  frame, CPU (numpy/cv2) preprocessing - the RF-DETR
+                                  counterpart of yolov8n.engine through src/detect.py
+    --preprocess cpu              + CUDA graph (Iteration 1)
+    (no flags)                    + fully GPU-side preprocessing (Iterations 1b/1c)
+    FP16 engine, no flags         + FP16 end-to-end (Iteration 4)
+
+Postprocessing is the same fixed-shape GPU top-k in every variant (there is no
+NMS to vary, see above).
+
 Usage (run from anywhere - the project root is added to sys.path below):
     python3 scripts/infer_rfdetr_trt.py --config configs/rfdetr.yaml \
         --engine models/rfdetr-nano_fp16.engine --source data/vtest.avi --no-display --max-frames 600
+    # TensorRT baseline vs. + CUDA graph (Iteration 1 A/B):
+    python3 scripts/infer_rfdetr_trt.py --engine models/rfdetr-nano_fp32.engine --no-graph --preprocess cpu \
+        --no-display --max-frames 600 --warmup-frames 50
+    python3 scripts/infer_rfdetr_trt.py --engine models/rfdetr-nano_fp32.engine --preprocess cpu \
+        --no-display --max-frames 600 --warmup-frames 50
 """
 from __future__ import annotations
 
@@ -70,6 +88,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--warmup-frames", type=int, default=None,
                    help="Frames to exclude from the FPS timer (in addition to the "
                         "engine/graph warm-up this script always does before the loop)")
+    p.add_argument("--no-graph", action="store_true",
+                   help="Execute the engine eagerly every frame instead of replaying a "
+                        "CUDA graph (the TensorRT baseline for the Iteration 1 A/B)")
+    p.add_argument("--preprocess", choices=["cpu", "gpu"], default="gpu",
+                   help="cpu: cv2 resize + numpy normalize, then upload (baseline); "
+                        "gpu: raw uint8 upload + GPU resize/normalize (Iterations 1b/1c)")
     return p.parse_args()
 
 
@@ -134,6 +158,17 @@ def preprocess_gpu(gpu_raw: torch.Tensor, res_hw: tuple[int, int], mean: torch.T
     img = img.permute(2, 0, 1).unsqueeze(0)  # -> (1, 3, H0, W0)
     img = F.interpolate(img, size=res_hw, mode="bilinear", align_corners=False, antialias=False)
     dst.copy_((img - mean) / std)
+
+
+def preprocess_cpu(frame: np.ndarray, res_hw: tuple[int, int], dst: torch.Tensor) -> None:
+    """Same math as preprocess_gpu(), done on the CPU the way the baseline does:
+    cv2 resize, numpy BGR->RGB / [0,1] / ImageNet-normalize / HWC->CHW in float32,
+    then one upload - copy_() also casts to the engine's input dtype."""
+    img = cv2.resize(frame, (res_hw[1], res_hw[0]), interpolation=cv2.INTER_LINEAR)
+    img = img[:, :, ::-1].astype(np.float32) / 255.0
+    img = (img - np.array(IMAGENET_MEAN, dtype=np.float32)) / np.array(IMAGENET_STD, dtype=np.float32)
+    img = np.ascontiguousarray(img.transpose(2, 0, 1))[None]  # -> (1, 3, H, W)
+    dst.copy_(torch.from_numpy(img))
 
 
 def postprocess(boxes_out: torch.Tensor, logits_out: torch.Tensor, conf_thres: float,
@@ -223,25 +258,37 @@ def main() -> None:
     std = torch.tensor(IMAGENET_STD, dtype=input_buf.dtype, device="cuda").view(1, 3, 1, 1)
     scale_xyxy = torch.tensor([w0, h0, w0, h0], dtype=torch.float32, device="cuda")
 
+    def preprocess(frame: np.ndarray) -> None:
+        if args.preprocess == "cpu":
+            preprocess_cpu(frame, res_hw, input_buf)
+        else:
+            cpu_staging.copy_(torch.from_numpy(frame))
+            gpu_raw.copy_(cpu_staging, non_blocking=True)
+            preprocess_gpu(gpu_raw, res_hw, mean, std, input_buf)
+
+    stage = f"graph={'off' if args.no_graph else 'on'} preprocess={args.preprocess}"
+    print(f"  stages: {stage}")
+
     stream = torch.cuda.Stream()
 
     # --- warm-up: at least one uncaptured execute is required by TensorRT
     # before graph capture (flushes any deferred setup work) ---
-    cpu_staging.copy_(torch.from_numpy(frame0))
-    gpu_raw.copy_(cpu_staging, non_blocking=True)
-    preprocess_gpu(gpu_raw, res_hw, mean, std, input_buf)
+    preprocess(frame0)
     torch.cuda.synchronize()
     for _ in range(3):
         with torch.cuda.stream(stream):
             context.execute_async_v3(stream.cuda_stream)
         stream.synchronize()
 
-    # --- capture the forward pass as a CUDA graph, once ---
-    print("Capturing CUDA graph...")
-    graph = torch.cuda.CUDAGraph()
-    with torch.cuda.graph(graph, stream=stream):
-        context.execute_async_v3(stream.cuda_stream)
-    print("Graph captured. Starting inference loop.")
+    graph = None
+    if not args.no_graph:
+        # --- capture the forward pass as a CUDA graph, once ---
+        print("Capturing CUDA graph...")
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph, stream=stream):
+            context.execute_async_v3(stream.cuda_stream)
+        print("Graph captured.")
+    print("Starting inference loop.")
 
     frames = 0
     timed_frames = 0
@@ -254,10 +301,15 @@ def main() -> None:
                 break
 
             with nvtx_range("inference"):
-                cpu_staging.copy_(torch.from_numpy(frame))
-                gpu_raw.copy_(cpu_staging, non_blocking=True)
-                preprocess_gpu(gpu_raw, res_hw, mean, std, input_buf)
-                graph.replay()
+                preprocess(frame)
+                if graph is None:
+                    # Eager baseline: preprocessing ran on the default stream, so
+                    # make the engine's stream wait for it before executing.
+                    stream.wait_stream(torch.cuda.current_stream())
+                    with torch.cuda.stream(stream):
+                        context.execute_async_v3(stream.cuda_stream)
+                else:
+                    graph.replay()
                 stream.synchronize()
                 preds = postprocess(boxes_buf, logits_buf, conf, scale_xyxy)
                 # Single GPU->CPU sync of the fixed (MAX_CANDIDATES, 6) tensor,
@@ -269,7 +321,7 @@ def main() -> None:
 
             if display:
                 with nvtx_range("display"):
-                    cv2.imshow("detections (rf-detr, cuda graph)", annotated)
+                    cv2.imshow(f"detections (rf-detr trt, {stage})", annotated)
                     if cv2.waitKey(1) & 0xFF == ord("q"):
                         break
 
