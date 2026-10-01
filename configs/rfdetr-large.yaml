@@ -1,0 +1,14 @@
+# RF-DETR Large configuration - same fields as rfdetr.yaml, larger model.
+# model:
+#   - src/detect.py (baseline): COCO-pretrained RF-DETR Large through rfdetr's own
+#     predict() (weights auto-download on first run). Same architecture as the
+#     project's SAR/IR detector, but NOT its fine-tuned weights.
+#   - scripts/infer_rfdetr_trt.py (optimized): a TensorRT .engine built by
+#     scripts/export_rfdetr.py --size large - pass it with --engine (this field is then ignored).
+model: rfdetr-large
+source: data/vtest.avi # v1b: local file. For v1a, set an rtsp:// URL (or pass --source)
+conf: 0.25 # confidence threshold (same as the other runs, for a like-for-like comparison)
+imgsz: 640 # ignored for RF-DETR: input resolution is fixed by the model size (large = 704)
+display: true # show the annotated window on the Jetson's monitor
+max_frames: 0 # 0 = run to end of source; set e.g. 600 to cap a profiling run
+warmup_frames: 0 # frames to exclude from the FPS timer (CUDA/TensorRT warm-up)

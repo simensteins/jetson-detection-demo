@@ -21,12 +21,25 @@ Transformers are more sensitive to FP16 than CNNs (LayerNorm/softmax ranges),
 so check detections visually and compare against the FP32 engine before
 trusting an FP16 speed number.
 
+--precision fp32 is "FP32" in TensorRT's default sense: on Ampere GPUs (the
+Jetson Orin included) TensorRT may run matmuls/convolutions in TF32 (10-bit
+mantissa) unless told otherwise. --no-tf32 passes --noTF32 for strict FP32;
+the engine then gets a "_notf32" suffix so the two can't be mixed up.
+
+The Orin Nano shares its memory between CPU and GPU, and building the Large
+engine (704x704) can run out of it - --mem-pool-mb caps TensorRT's builder
+workspace (e.g. 2048).
+
 Usage (from the repo root):
     python3 scripts/export_rfdetr.py --size nano --precision fp32
     python3 scripts/export_rfdetr.py --size nano --precision fp16
     # ONNX on another machine, engine on the Jetson:
     python3 scripts/export_rfdetr.py --size nano --onnx-only
     python3 scripts/export_rfdetr.py --size nano --onnx models/rfdetr-nano.onnx --precision fp16
+    # Large on the Orin Nano, default FP32 (TF32 allowed) and strict FP32 from the same ONNX:
+    python3 scripts/export_rfdetr.py --size large --precision fp32 --mem-pool-mb 2048
+    python3 scripts/export_rfdetr.py --size large --precision fp32 --no-tf32 --mem-pool-mb 2048 \
+        --onnx models/rfdetr-large.onnx
 """
 from __future__ import annotations
 
@@ -51,6 +64,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--onnx", default=None, help="Skip ONNX export and build from this .onnx")
     p.add_argument("--onnx-only", action="store_true", help="Export ONNX, don't build an engine")
     p.add_argument("--trtexec", default=None, help=f"trtexec path (default: PATH, then {TRTEXEC_DEFAULT})")
+    p.add_argument("--no-tf32", action="store_true",
+                   help="Strict FP32: pass --noTF32 to trtexec (engine name gets a _notf32 suffix)")
+    p.add_argument("--mem-pool-mb", type=int, default=None,
+                   help="Cap the TensorRT builder workspace (MiB), e.g. 2048 on the Orin Nano")
     return p.parse_args()
 
 
@@ -88,8 +105,13 @@ def find_trtexec(override: str | None) -> str:
                      f"{TRTEXEC_DEFAULT}).")
 
 
-def build_engine(onnx_path: Path, engine_path: Path, precision: str, trtexec: str) -> None:
+def build_engine(onnx_path: Path, engine_path: Path, precision: str, trtexec: str,
+                 no_tf32: bool = False, mem_pool_mb: int | None = None) -> None:
     cmd = [trtexec, f"--onnx={onnx_path}", f"--saveEngine={engine_path}"]
+    if no_tf32:
+        cmd.append("--noTF32")
+    if mem_pool_mb:
+        cmd.append(f"--memPoolSize=workspace:{mem_pool_mb}")
     if precision == "fp16":
         cmd.append("--fp16")
         inputs, outputs = onnx_io_names(onnx_path)
@@ -112,10 +134,13 @@ def main() -> None:
     if args.onnx_only:
         return
 
-    engine_path = outdir / f"rfdetr-{args.size}_{args.precision}.engine"
-    build_engine(onnx_path, engine_path, args.precision, find_trtexec(args.trtexec))
+    suffix = "_notf32" if args.no_tf32 else ""
+    engine_path = outdir / f"rfdetr-{args.size}_{args.precision}{suffix}.engine"
+    build_engine(onnx_path, engine_path, args.precision, find_trtexec(args.trtexec),
+                 no_tf32=args.no_tf32, mem_pool_mb=args.mem_pool_mb)
     print(f"wrote {engine_path}")
-    print(f"next: python3 scripts/infer_rfdetr_trt.py --config configs/rfdetr.yaml --engine {engine_path}")
+    config = "configs/rfdetr-large.yaml" if args.size == "large" else "configs/rfdetr.yaml"
+    print(f"next: python3 scripts/infer_rfdetr_trt.py --config {config} --engine {engine_path}")
 
 
 if __name__ == "__main__":
