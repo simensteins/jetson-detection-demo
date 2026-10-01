@@ -1,55 +1,38 @@
 #!/usr/bin/env python3
-"""RF-DETR through the same optimized pipeline as the YOLO iterations.
+"""RF-DETR Large through TensorRT, with and without a CUDA graph.
 
-The RF-DETR counterpart of scripts/infer_cuda_graph_custom_nms.py (Iteration 3)
-and scripts/infer_cuda_graph_fp16.py (Iteration 4), so the two models can be
-compared with the same optimizations applied, not just baseline-vs-baseline:
+A separate script from scripts/infer_rfdetr_trt.py on purpose: that one is the
+nano experiment exactly as it was run (including its --preprocess cpu baseline,
+see README "RF-DETR nano experiments - note on the baseline"), and stays
+unchanged for traceability.
 
-- TensorRT engine executed through a captured CUDA graph (Iteration 1)
-- fully GPU-side preprocessing, including resize (Iterations 1b/1c)
-- fixed-shape, graph-safe GPU postprocessing with a single GPU->CPU sync (Iteration 3)
-- data kept in whatever dtype the engine declares - FP16 end-to-end for an
-  FP16-I/O engine, with one deliberate cast on the tiny selected tensor (Iteration 4)
+The baseline here is rfdetr's own default inference path (RFDETR.predict(),
+source-checked in rfdetr 1.11.1), with only the model swapped from PyTorch to
+TensorRT:
 
-What is structurally different from YOLO, and worth looking for in the nsys
-timeline:
+- Preprocessing on the GPU, as predict() does it: the uint8 frame is uploaded
+  through pinned memory, then converted to float / 255, resized to the model's
+  square input (bilinear, antialias=False) and ImageNet-normalized on the GPU.
+  There is no CPU-preprocessing option - rfdetr itself never preprocesses on
+  the CPU, so it would not be a baseline. The only extra step is BGR -> RGB
+  (OpenCV decodes BGR, predict() expects RGB), done on the GPU.
+- Postprocessing mirrors rfdetr's PostProcess: sigmoid, then top-k over every
+  (query, class) pair with num_select = 300 (RFDETRLargeConfig), no NMS.
+- No CUDA graph (predict() uses none unless optimize_for_inference() is called).
 
-- **No NMS.** RF-DETR is a DETR-style detector: a fixed set of object queries,
-  trained with one-to-one (Hungarian) matching, so each object is predicted
-  once. Postprocessing is just sigmoid + top-k over (query, class) pairs - no
-  IoU matrix, no suppression. Iteration 3's whole custom-NMS stage disappears.
-- **No letterbox.** RF-DETR is trained on a plain (aspect-distorting) resize to
-  a square input, and predicts boxes normalized to [0, 1]. Scaling back to the
-  source frame is a multiply by (w0, h0, w0, h0) - no padding to subtract.
-- **ImageNet normalization** ((x - mean) / std) instead of YOLO's plain /255,
-  because the backbone is a DINOv2 ViT.
-- **Class ids are COCO category ids** (1..90, with gaps), not YOLO's contiguous
-  0..79 - the drawn numbers are not comparable between the two models.
+The single variable this script changes is --no-graph:
 
-The engine is built by scripts/export_rfdetr.py (ONNX -> trtexec). It's
-deserialized directly with the TensorRT Python API rather than through
-Ultralytics' AutoBackend, since Ultralytics doesn't load RF-DETR.
+    --no-graph    TensorRT baseline: engine executed eagerly every frame
+    (no flags)    + CUDA graph (Iteration 1): the forward pass captured once,
+                  replayed with one call per frame
 
-Stage flags - so the iterations can be measured one at a time, the same
-single-variable way as for YOLO (defaults = everything on):
-
-    --no-graph --preprocess cpu   TensorRT baseline: engine executed eagerly every
-                                  frame, CPU (numpy/cv2) preprocessing - the RF-DETR
-                                  counterpart of yolov8n.engine through src/detect.py
-    --preprocess cpu              + CUDA graph (Iteration 1)
-    (no flags)                    + fully GPU-side preprocessing (Iterations 1b/1c)
-    FP16 engine, no flags         + FP16 end-to-end (Iteration 4)
-
-Postprocessing is the same fixed-shape GPU top-k in every variant (there is no
-NMS to vary, see above).
+The engine is built by scripts/export_rfdetr.py --size large (strict FP32 by
+default). Its input resolution (704x704 for Large) is read from the engine.
 
 Usage (run from anywhere - the project root is added to sys.path below):
-    python3 scripts/infer_rfdetr_trt.py --config configs/rfdetr.yaml \
-        --engine models/rfdetr-nano_fp16.engine --source data/vtest.avi --no-display --max-frames 600
-    # TensorRT baseline vs. + CUDA graph (Iteration 1 A/B):
-    python3 scripts/infer_rfdetr_trt.py --engine models/rfdetr-nano_fp32.engine --no-graph --preprocess cpu \
+    python3 scripts/infer_rfdetr_large_trt.py --engine models/rfdetr-large_fp32-strict.engine --no-graph \
         --no-display --max-frames 600 --warmup-frames 50
-    python3 scripts/infer_rfdetr_trt.py --engine models/rfdetr-nano_fp32.engine --preprocess cpu \
+    python3 scripts/infer_rfdetr_large_trt.py --engine models/rfdetr-large_fp32-strict.engine \
         --no-display --max-frames 600 --warmup-frames 50
 """
 from __future__ import annotations
@@ -70,16 +53,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.profiling import nvtx_range  # noqa: E402
 from src.sources import open_source  # noqa: E402
 
-MAX_CANDIDATES = 100  # same fixed output size as the YOLO iterations (COCO max-100 convention)
+NUM_SELECT = 300  # rfdetr's num_select for RF-DETR Large (RFDETRLargeConfig)
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="RF-DETR: TensorRT + CUDA graph + GPU pre/postprocessing")
-    p.add_argument("--config", default="configs/rfdetr.yaml", help="YAML config path")
+    p = argparse.ArgumentParser(description="RF-DETR Large: TensorRT baseline vs. + CUDA graph")
+    p.add_argument("--config", default="configs/rfdetr-large.yaml", help="YAML config path")
     p.add_argument("--engine", default=None,
-                   help="TensorRT .engine from scripts/export_rfdetr.py (overrides config 'model')")
+                   help="TensorRT .engine from scripts/export_rfdetr.py --size large "
+                        "(overrides config 'model')")
     p.add_argument("--source", default=None,
                    help="Override source: file path, rtsp:// URL, or webcam index")
     p.add_argument("--no-display", action="store_true", help="Run headless (no window)")
@@ -89,11 +73,8 @@ def parse_args() -> argparse.Namespace:
                    help="Frames to exclude from the FPS timer (in addition to the "
                         "engine/graph warm-up this script always does before the loop)")
     p.add_argument("--no-graph", action="store_true",
-                   help="Execute the engine eagerly every frame instead of replaying a "
-                        "CUDA graph (the TensorRT baseline for the Iteration 1 A/B)")
-    p.add_argument("--preprocess", choices=["cpu", "gpu"], default="gpu",
-                   help="cpu: cv2 resize + numpy normalize, then upload (baseline); "
-                        "gpu: raw uint8 upload + GPU resize/normalize (Iterations 1b/1c)")
+                   help="TensorRT baseline: execute the engine eagerly every frame "
+                        "instead of replaying a CUDA graph")
     return p.parse_args()
 
 
@@ -135,8 +116,7 @@ class TrtEngine:
 
 
 def split_outputs(outputs: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
-    """Identify (boxes, logits) by shape rather than by name, so it doesn't
-    depend on what a given rfdetr version calls them: boxes are (1, Q, 4),
+    """Identify (boxes, logits) by shape rather than by name: boxes are (1, Q, 4),
     class logits are (1, Q, num_classes)."""
     if len(outputs) != 2:
         raise SystemExit(f"Expected 2 engine outputs (boxes, logits), got {list(outputs)}")
@@ -148,54 +128,36 @@ def split_outputs(outputs: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch
     return boxes[0], logits[0]
 
 
-def preprocess_gpu(gpu_raw: torch.Tensor, res_hw: tuple[int, int], mean: torch.Tensor,
-                    std: torch.Tensor, dst: torch.Tensor) -> None:
-    """BGR uint8 HWC -> RGB, [0,1], plain resize to the model's square input,
-    ImageNet-normalize - computed directly in dst's dtype (FP16 for an FP16-I/O
-    engine), so the final copy_() into the graph's input buffer is same-dtype.
-    antialias=False matches the YOLO iterations' resize."""
-    img = gpu_raw.flip(-1).to(dst.dtype) / 255.0
-    img = img.permute(2, 0, 1).unsqueeze(0)  # -> (1, 3, H0, W0)
+def preprocess(gpu_raw: torch.Tensor, res_hw: tuple[int, int], mean: torch.Tensor,
+               std: torch.Tensor, dst: torch.Tensor) -> None:
+    """rfdetr predict()'s GPU steps, in its order: uint8 -> float / 255, resize
+    (bilinear, antialias=False), ImageNet-normalize. The BGR -> RGB flip comes
+    first because OpenCV decodes BGR."""
+    img = gpu_raw.flip(-1).permute(2, 0, 1).unsqueeze(0).to(dst.dtype) / 255.0  # (1, 3, H0, W0)
     img = F.interpolate(img, size=res_hw, mode="bilinear", align_corners=False, antialias=False)
     dst.copy_((img - mean) / std)
 
 
-def preprocess_cpu(frame: np.ndarray, res_hw: tuple[int, int], dst: torch.Tensor) -> None:
-    """Same math as preprocess_gpu(), done on the CPU the way the baseline does:
-    cv2 resize, numpy BGR->RGB / [0,1] / ImageNet-normalize / HWC->CHW in float32,
-    then one upload - copy_() also casts to the engine's input dtype."""
-    img = cv2.resize(frame, (res_hw[1], res_hw[0]), interpolation=cv2.INTER_LINEAR)
-    img = img[:, :, ::-1].astype(np.float32) / 255.0
-    img = (img - np.array(IMAGENET_MEAN, dtype=np.float32)) / np.array(IMAGENET_STD, dtype=np.float32)
-    img = np.ascontiguousarray(img.transpose(2, 0, 1))[None]  # -> (1, 3, H, W)
-    dst.copy_(torch.from_numpy(img))
-
-
 def postprocess(boxes_out: torch.Tensor, logits_out: torch.Tensor, conf_thres: float,
-                 scale_xyxy: torch.Tensor) -> torch.Tensor:
-    """Fixed-shape (MAX_CANDIDATES, 6) [x1, y1, x2, y2, score, cls] in source-frame
-    pixels; rows below conf_thres get score 0 (same convention as Iteration 3).
-
-    Mirrors rfdetr's own PostProcess: sigmoid, then top-k over every
-    (query, class) pair - no NMS. Sigmoid and top-k run in the engine's output
-    dtype (scores are 0-1, safe in FP16). The selected boxes are cast to FP32
-    before scaling to pixels: boxes are normalized to [0, 1], and FP16 has only
-    ~3 significant digits, so scaling in FP16 would cost ~0.5 px at 768 wide."""
-    prob = logits_out[0].sigmoid()  # (Q, C)
+                scale_xyxy: torch.Tensor) -> torch.Tensor:
+    """Fixed-shape (NUM_SELECT, 6) [x1, y1, x2, y2, score, cls] in source-frame
+    pixels, as rfdetr's PostProcess: sigmoid, then top-k over every (query, class)
+    pair, boxes (cx, cy, w, h) normalized to [0, 1] scaled to the frame. Rows
+    below conf_thres get score 0 (filtered when drawing, not by a shape change)."""
+    prob = logits_out[0].float().sigmoid()  # (Q, C)
     num_classes = prob.shape[1]
-    topk_scores, topk_idx = torch.topk(prob.reshape(-1), k=MAX_CANDIDATES)  # sorted desc
+    topk_scores, topk_idx = torch.topk(prob.reshape(-1), k=NUM_SELECT)  # sorted desc
     query_idx = torch.div(topk_idx, num_classes, rounding_mode="floor")
     classes = topk_idx % num_classes
 
-    cx, cy, w, h = boxes_out[0][query_idx].float().unbind(-1)  # <- the one deliberate cast
+    cx, cy, w, h = boxes_out[0][query_idx].float().unbind(-1)
     boxes_xyxy = torch.stack([cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2], dim=-1) * scale_xyxy
-    scores = topk_scores.float()
-    scores = torch.where(scores >= conf_thres, scores, torch.zeros_like(scores))
+    scores = torch.where(topk_scores >= conf_thres, topk_scores, torch.zeros_like(topk_scores))
     return torch.cat([boxes_xyxy, scores.unsqueeze(1), classes.float().unsqueeze(1)], dim=1)
 
 
 def draw_detections(frame: np.ndarray, dets_cpu: np.ndarray, class_names: dict) -> np.ndarray:
-    """dets_cpu: (MAX_CANDIDATES, 6), already in source-frame pixels (no letterbox to undo)."""
+    """dets_cpu: (NUM_SELECT, 6), already in source-frame pixels (no letterbox to undo)."""
     annotated = frame.copy()
     for x1, y1, x2, y2, conf, cls in dets_cpu[dets_cpu[:, 4] > 0].tolist():
         p1, p2 = (int(x1), int(y1)), (int(x2), int(y2))
@@ -220,8 +182,8 @@ def main() -> None:
     engine_path = args.engine if args.engine is not None else cfg["model"]
     if not str(engine_path).endswith(".engine"):
         raise SystemExit(
-            f"This script needs a TensorRT .engine, got {engine_path!r}. "
-            "Build one with scripts/export_rfdetr.py and pass it with --engine."
+            f"This script needs a TensorRT .engine, got {engine_path!r}. Build one with "
+            "scripts/export_rfdetr.py --size large and pass it with --engine."
         )
 
     # Class names are cosmetic - the script runs without rfdetr installed.
@@ -235,12 +197,16 @@ def main() -> None:
     context = trt_engine.context
     if len(trt_engine.inputs) != 1:
         raise SystemExit(f"Expected 1 engine input, got {list(trt_engine.inputs)}")
-    input_name, input_buf = next(iter(trt_engine.inputs.items()))
+    input_buf = next(iter(trt_engine.inputs.values()))
     boxes_buf, logits_buf = split_outputs(trt_engine.outputs)
     for name, t in {**trt_engine.inputs, **trt_engine.outputs}.items():
         print(f"  {name!r} shape={tuple(t.shape)} dtype={t.dtype}")
     res_hw = tuple(input_buf.shape[2:])
     print(f"  model input resolution: {res_hw[1]}x{res_hw[0]}, engine I/O dtype: {input_buf.dtype}")
+    if res_hw != (704, 704):
+        print(f"  WARNING: RF-DETR Large is 704x704 - is {engine_path!r} really a Large engine?")
+    if boxes_buf.shape[1] < NUM_SELECT:
+        raise SystemExit(f"Engine has {boxes_buf.shape[1]} queries, fewer than NUM_SELECT={NUM_SELECT}")
 
     cap = open_source(source)
     if not cap.isOpened():
@@ -258,22 +224,19 @@ def main() -> None:
     std = torch.tensor(IMAGENET_STD, dtype=input_buf.dtype, device="cuda").view(1, 3, 1, 1)
     scale_xyxy = torch.tensor([w0, h0, w0, h0], dtype=torch.float32, device="cuda")
 
-    def preprocess(frame: np.ndarray) -> None:
-        if args.preprocess == "cpu":
-            preprocess_cpu(frame, res_hw, input_buf)
-        else:
-            cpu_staging.copy_(torch.from_numpy(frame))
-            gpu_raw.copy_(cpu_staging, non_blocking=True)
-            preprocess_gpu(gpu_raw, res_hw, mean, std, input_buf)
+    def upload_and_preprocess(frame: np.ndarray) -> None:
+        cpu_staging.copy_(torch.from_numpy(frame))
+        gpu_raw.copy_(cpu_staging, non_blocking=True)
+        preprocess(gpu_raw, res_hw, mean, std, input_buf)
 
-    stage = f"graph={'off' if args.no_graph else 'on'} preprocess={args.preprocess}"
-    print(f"  stages: {stage}")
+    stage = f"graph={'off' if args.no_graph else 'on'}"
+    print(f"  stage: {stage} (preprocessing on the GPU, as rfdetr's predict())")
 
     stream = torch.cuda.Stream()
 
     # --- warm-up: at least one uncaptured execute is required by TensorRT
     # before graph capture (flushes any deferred setup work) ---
-    preprocess(frame0)
+    upload_and_preprocess(frame0)
     torch.cuda.synchronize()
     for _ in range(3):
         with torch.cuda.stream(stream):
@@ -301,10 +264,10 @@ def main() -> None:
                 break
 
             with nvtx_range("inference"):
-                preprocess(frame)
+                upload_and_preprocess(frame)
                 if graph is None:
-                    # Eager baseline: preprocessing ran on the default stream, so
-                    # make the engine's stream wait for it before executing.
+                    # Preprocessing ran on the default stream, so make the
+                    # engine's stream wait for it before executing.
                     stream.wait_stream(torch.cuda.current_stream())
                     with torch.cuda.stream(stream):
                         context.execute_async_v3(stream.cuda_stream)
@@ -312,7 +275,7 @@ def main() -> None:
                     graph.replay()
                 stream.synchronize()
                 preds = postprocess(boxes_buf, logits_buf, conf, scale_xyxy)
-                # Single GPU->CPU sync of the fixed (MAX_CANDIDATES, 6) tensor,
+                # Single GPU->CPU sync of the fixed (NUM_SELECT, 6) tensor,
                 # inside "inference" - same placement as the YOLO iterations.
                 preds_cpu = preds.cpu().numpy()
 
@@ -321,7 +284,7 @@ def main() -> None:
 
             if display:
                 with nvtx_range("display"):
-                    cv2.imshow(f"detections (rf-detr trt, {stage})", annotated)
+                    cv2.imshow(f"detections (rf-detr large trt, {stage})", annotated)
                     if cv2.waitKey(1) & 0xFF == ord("q"):
                         break
 

@@ -144,8 +144,8 @@ def main() -> None:
     build_engine(onnx_path, engine_path, args.precision, find_trtexec(args.trtexec),
                  mem_pool_mb=args.mem_pool_mb)
     print(f"wrote {engine_path}")
-    config = "configs/rfdetr-large.yaml" if args.size == "large" else "configs/rfdetr.yaml"
-    print(f"next: python3 scripts/infer_rfdetr_trt.py --config {config} --engine {engine_path}")
+    script = "infer_rfdetr_large_trt.py" if args.size == "large" else "infer_rfdetr_trt.py"
+    print(f"next: python3 scripts/{script} --engine {engine_path}")
 
 
 if __name__ == "__main__":
