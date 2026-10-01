@@ -30,26 +30,28 @@ The engine is built by scripts/export_rfdetr.py (ONNX -> trtexec). It's
 deserialized directly with the TensorRT Python API rather than through
 Ultralytics' AutoBackend, since Ultralytics doesn't load RF-DETR.
 
-Stage flags - so the iterations can be measured one at a time, the same
-single-variable way as for YOLO (defaults = everything on):
+Stage flags - so each step can be measured on its own (defaults = everything on).
+The baseline follows what rfdetr's own predict() does (source-checked, rfdetr
+1.11.1): it already preprocesses on the GPU (uint8 upload to pinned memory,
+then float / resize without antialias / ImageNet-normalize on the GPU) and uses
+no CUDA graph. So, unlike YOLO (Ultralytics letterboxes on the CPU), GPU
+preprocessing is part of RF-DETR's starting point, not an optimization:
 
-    --no-graph --preprocess cpu   TensorRT baseline: engine executed eagerly every
-                                  frame, CPU (numpy/cv2) preprocessing - the RF-DETR
-                                  counterpart of yolov8n.engine through src/detect.py
-    --preprocess cpu              + CUDA graph (Iteration 1)
-    (no flags)                    + fully GPU-side preprocessing (Iterations 1b/1c)
-    FP16 engine, no flags         + FP16 end-to-end (Iteration 4)
+    --no-graph --preprocess gpu   TensorRT baseline: rfdetr's default inference path,
+                                  with the model run by TensorRT instead of PyTorch
+    (no flags)                    + CUDA graph (Iteration 1)
+    --preprocess cpu              controlled experiment only: YOLO's starting point
+                                  (cv2 resize + numpy normalize on the CPU). Not
+                                  something rfdetr itself does.
 
 Postprocessing is the same fixed-shape GPU top-k in every variant (there is no
 NMS to vary, see above).
 
 Usage (run from anywhere - the project root is added to sys.path below):
-    python3 scripts/infer_rfdetr_trt.py --config configs/rfdetr.yaml \
-        --engine models/rfdetr-nano_fp16.engine --source data/vtest.avi --no-display --max-frames 600
-    # TensorRT baseline vs. + CUDA graph (Iteration 1 A/B):
-    python3 scripts/infer_rfdetr_trt.py --engine models/rfdetr-nano_fp32.engine --no-graph --preprocess cpu \
+    # TensorRT baseline vs. + CUDA graph (Iteration 1 A/B), strict-FP32 engine:
+    python3 scripts/infer_rfdetr_trt.py --engine models/rfdetr-nano_fp32-strict.engine --no-graph --preprocess gpu \
         --no-display --max-frames 600 --warmup-frames 50
-    python3 scripts/infer_rfdetr_trt.py --engine models/rfdetr-nano_fp32.engine --preprocess cpu \
+    python3 scripts/infer_rfdetr_trt.py --engine models/rfdetr-nano_fp32-strict.engine \
         --no-display --max-frames 600 --warmup-frames 50
 """
 from __future__ import annotations
@@ -90,10 +92,11 @@ def parse_args() -> argparse.Namespace:
                         "engine/graph warm-up this script always does before the loop)")
     p.add_argument("--no-graph", action="store_true",
                    help="Execute the engine eagerly every frame instead of replaying a "
-                        "CUDA graph (the TensorRT baseline for the Iteration 1 A/B)")
+                        "CUDA graph (with --preprocess gpu: the TensorRT baseline)")
     p.add_argument("--preprocess", choices=["cpu", "gpu"], default="gpu",
-                   help="cpu: cv2 resize + numpy normalize, then upload (baseline); "
-                        "gpu: raw uint8 upload + GPU resize/normalize (Iterations 1b/1c)")
+                   help="gpu: uint8 upload + GPU resize/normalize, as rfdetr's own predict() "
+                        "does (baseline); cpu: cv2 resize + numpy normalize (controlled "
+                        "experiment with YOLO's starting point only)")
     return p.parse_args()
 
 

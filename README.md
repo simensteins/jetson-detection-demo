@@ -82,10 +82,15 @@ bash scripts/profile.sh --config configs/rfdetr.yaml   # later --config wins
 **Optimized** (TensorRT + CUDA graph + GPU pre/postprocessing, i.e. the RF-DETR
 version of Iterations 1-4):
 ```
-python3 scripts/export_rfdetr.py --size nano --precision fp32   # -> models/rfdetr-nano_fp32.engine
-python3 scripts/export_rfdetr.py --size nano --precision fp16   # -> models/rfdetr-nano_fp16.engine
-python3 scripts/infer_rfdetr_trt.py --engine models/rfdetr-nano_fp16.engine --no-display --max-frames 600
+python3 scripts/export_rfdetr.py --size nano   # -> models/rfdetr-nano_fp32-strict.engine
+python3 scripts/infer_rfdetr_trt.py --engine models/rfdetr-nano_fp32-strict.engine --no-display --max-frames 600
 ```
+Precision (`--precision`, named in the engine file so every result traces to one):
+- `fp32-strict` (default): every layer in full FP32 (`trtexec --noTF32`).
+- `fp32-tf32`: FP32, but TensorRT may run matmuls/convolutions in TF32
+  (10-bit mantissa) - TensorRT's own default on the Orin. An older
+  `rfdetr-nano_fp32.engine` (no suffix) is this variant.
+- `fp16`: reduced precision - not used in this project (detection accuracy first).
 The ONNX export step can run on another machine (`--onnx-only`, then
 `--onnx <file>` on the Jetson); the engine build must run on the Jetson.
 RF-DETR has no NMS, uses a plain resize (no letterbox), and its input
@@ -93,16 +98,14 @@ resolution is fixed by the model size (nano = 384). See the docstring of
 `scripts/infer_rfdetr_trt.py` for what differs from YOLO.
 
 **Large** (704×704, the architecture of the project's SAR/IR detector, here with
-COCO weights). FP32 only. `--precision fp32` lets TensorRT use TF32 on the
-Orin (its default); `--no-tf32` builds a strict-FP32 engine (`_notf32` suffix).
-`--mem-pool-mb` caps the build's memory, which the Orin Nano shares with the CPU:
+COCO weights), strict FP32. `--mem-pool-mb` caps the build's memory, which
+the Orin Nano shares with the CPU:
 ```
 python -m src.detect --config configs/rfdetr-large.yaml --no-display --max-frames 600 --warmup-frames 50   # PyTorch
-python3 scripts/export_rfdetr.py --size large --precision fp32 --mem-pool-mb 2048
-python3 scripts/export_rfdetr.py --size large --precision fp32 --no-tf32 --mem-pool-mb 2048 --onnx models/rfdetr-large.onnx
-python3 scripts/infer_rfdetr_trt.py --config configs/rfdetr-large.yaml --engine models/rfdetr-large_fp32.engine \
+python3 scripts/export_rfdetr.py --size large --mem-pool-mb 2048   # -> models/rfdetr-large_fp32-strict.engine
+python3 scripts/infer_rfdetr_trt.py --config configs/rfdetr-large.yaml --engine models/rfdetr-large_fp32-strict.engine \
     --no-graph --preprocess gpu --no-display --max-frames 600 --warmup-frames 50   # TensorRT baseline
-python3 scripts/infer_rfdetr_trt.py --config configs/rfdetr-large.yaml --engine models/rfdetr-large_fp32.engine \
+python3 scripts/infer_rfdetr_trt.py --config configs/rfdetr-large.yaml --engine models/rfdetr-large_fp32-strict.engine \
     --preprocess gpu --no-display --max-frames 600 --warmup-frames 50              # + CUDA graph
 ```
 The TensorRT baseline uses `--preprocess gpu` because rfdetr's own `predict()`
