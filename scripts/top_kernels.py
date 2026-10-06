@@ -37,14 +37,12 @@ import sqlite3
 import sys
 
 
-def main() -> None:
-    if len(sys.argv) < 2:
-        print("usage: top_kernels.py <report.sqlite> [skip_frames] [top_n]")
-        raise SystemExit(1)
-    db_path = sys.argv[1]
-    skip = int(sys.argv[2]) if len(sys.argv) > 2 else 50
-    top_n = int(sys.argv[3]) if len(sys.argv) > 3 else 15
+def rank_kernels(db_path: str, skip: int) -> tuple[list[tuple[str, dict]], int, int]:
+    """Kernels inside the analysed 'inference' ranges, heaviest first.
 
+    Returns (ranked, n_frames, total_ns), where ranked is a list of
+    (kernel name, {"n": launches, "ns": total time, "grids", "blocks", "regs"}).
+    """
     cur = sqlite3.connect(db_path).cursor()
     existing = {r[0] for r in cur.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     missing = [t for t in ("NVTX_EVENTS", "CUPTI_ACTIVITY_KIND_KERNEL", "StringIds") if t not in existing]
@@ -79,14 +77,33 @@ def main() -> None:
         a["regs"].add(regs)
 
     total_ns = sum(a["ns"] for a in agg.values())
-    launches = sum(a["n"] for a in agg.values())
+    return sorted(agg.items(), key=lambda kv: -kv[1]["ns"]), n_frames, total_ns
+
+
+def ncu_filter(a: dict, n_frames: int, skip: int) -> tuple[int, int, float]:
+    """(launch-skip, launch-count, exact launches/frame) covering one full frame after warm-up."""
+    per_frame = a["n"] / n_frames
+    count = round(per_frame)
+    return count * skip, count, per_frame
+
+
+def main() -> None:
+    if len(sys.argv) < 2:
+        print("usage: top_kernels.py <report.sqlite> [skip_frames] [top_n]")
+        raise SystemExit(1)
+    db_path = sys.argv[1]
+    skip = int(sys.argv[2]) if len(sys.argv) > 2 else 50
+    top_n = int(sys.argv[3]) if len(sys.argv) > 3 else 15
+
+    all_ranked, n_frames, total_ns = rank_kernels(db_path, skip)
+    launches = sum(a["n"] for _, a in all_ranked)
     print(f"=== GPU kernels inside 'inference' (skipped first {skip} ranges as warm-up, n={n_frames}) ===")
     print(f"kernel time {total_ns / n_frames / 1e6:.3f} ms/frame, {launches / n_frames:.1f} launches/frame, "
-          f"{len(agg)} distinct kernel names\n")
+          f"{len(all_ranked)} distinct kernel names\n")
     print(f"{'#':>2} {'share':>6} {'cum':>6} {'ms/frame':>9} {'per frame':>9} {'grid (blocks)':>14} "
           f"{'block':>6} {'regs':>8}  kernel")
 
-    ranked = sorted(agg.items(), key=lambda kv: -kv[1]["ns"])[:top_n]
+    ranked = all_ranked[:top_n]
     cum = 0
     for rank, (name, a) in enumerate(ranked, 1):
         cum += a["ns"]
@@ -100,11 +117,10 @@ def main() -> None:
 
     print("\n=== Suggested Nsight Compute filters (with --nvtx --nvtx-include \"inference/\") ===")
     for rank, (name, a) in enumerate(ranked, 1):
-        per_frame = a["n"] / n_frames
-        count = round(per_frame)
+        launch_skip, count, per_frame = ncu_filter(a, n_frames, skip)
         note = "" if abs(per_frame - count) < 0.01 else f"   (WARNING: {per_frame:.2f} launches/frame is not constant)"
         print(f"{rank:2d} --kernel-name regex:'^{re.escape(name)}$' "
-              f"--launch-skip {count * skip} --launch-count {count}{note}")
+              f"--launch-skip {launch_skip} --launch-count {count}{note}")
 
 
 if __name__ == "__main__":
