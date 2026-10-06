@@ -50,7 +50,7 @@ def sum_overlap(cur: sqlite3.Cursor, table: str, start: int, end: int) -> tuple[
 
 def nvtx_range_stats(cur: sqlite3.Cursor, skip: int) -> dict[str, list[float]]:
     ranges: dict[str, list[float]] = {}
-    for name in ("decode", "inference", "draw", "display"):
+    for name in ("decode", "inference", "draw", "display", "output"):
         rows = cur.execute(
             "SELECT start, end FROM NVTX_EVENTS WHERE text=? ORDER BY start", (name,),
         ).fetchall()

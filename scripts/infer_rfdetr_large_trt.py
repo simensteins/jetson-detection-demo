@@ -51,6 +51,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.profiling import nvtx_range  # noqa: E402
+from src.sinks import open_sink  # noqa: E402
 from src.sources import open_source  # noqa: E402
 
 NUM_SELECT = 300  # rfdetr's num_select for RF-DETR Large (RFDETRLargeConfig)
@@ -67,6 +68,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--source", default=None,
                    help="Override source: file path, rtsp:// URL, or webcam index")
     p.add_argument("--no-display", action="store_true", help="Run headless (no window)")
+    p.add_argument("--sink", default=None,
+                   help="Send annotated video on, e.g. rtp://<host-ip>:5000 (see src/sinks.py)")
     p.add_argument("--max-frames", type=int, default=None,
                    help="Override max_frames from config (0 = run to end of source)")
     p.add_argument("--warmup-frames", type=int, default=None,
@@ -174,6 +177,7 @@ def main() -> None:
 
     source = args.source if args.source is not None else cfg["source"]
     display = cfg.get("display", True) and not args.no_display
+    sink_spec = args.sink if args.sink is not None else cfg.get("sink")
     conf = cfg.get("conf", 0.25)
     max_frames = args.max_frames if args.max_frames is not None else cfg.get("max_frames", 0)
     warmup_frames = (args.warmup_frames if args.warmup_frames is not None
@@ -253,6 +257,7 @@ def main() -> None:
         print("Graph captured.")
     print("Starting inference loop.")
 
+    sink = None
     frames = 0
     timed_frames = 0
     t0 = time.perf_counter()
@@ -288,6 +293,12 @@ def main() -> None:
                     if cv2.waitKey(1) & 0xFF == ord("q"):
                         break
 
+            if sink_spec:
+                if sink is None:  # opened on the first frame, once its size is known
+                    sink = open_sink(sink_spec, w0, h0, cap.get(cv2.CAP_PROP_FPS))
+                with nvtx_range("output"):
+                    sink.write(annotated)
+
             frames += 1
             if frames <= warmup_frames:
                 if frames == warmup_frames:
@@ -298,6 +309,8 @@ def main() -> None:
                 break
     finally:
         cap.release()
+        if sink is not None:
+            sink.release()
         cv2.destroyAllWindows()
 
     dt = time.perf_counter() - t0

@@ -57,6 +57,58 @@ On the **Mac**: `mediamtx` in one terminal, then
 On the **Jetson**: set `source: rtsp://192.168.55.100:8554/demo` in the config
 (or `--source`), then run `python -m src.detect`.
 
+## Replica setup (host → Jetson → host)
+
+Mirrors the development side of the SAR AI system architecture ("Recorded
+video on host PC" → Edge Compute Platform → "Home-made Mission Console on host
+PC"). The main point is the **input**: the Jetson receives a real video stream
+over the network, as the Edge Compute Platform (ECP) will, instead of reading a
+file from its own disk. Sending annotated video back to the host is optional.
+
+| Machine | Role in the architecture | Runs |
+| --- | --- | --- |
+| Host (OptiPlex, Ubuntu) | Video source (stands in for the VRD), mission console, Nsight host | `scripts/rtsp_server_host.sh`, `ffplay` (optional), Nsight Systems/Compute GUI |
+| Jetson Orin Nano | Edge Compute Platform (ECP) | `src/detect.py` / `scripts/infer_rfdetr_large_trt.py` with `--source rtsp://…` (and optionally `--sink rtp://…`) |
+
+Connect the two with wired Ethernet (directly or through a switch; Wi-Fi makes
+timings noisy) and static IPs - e.g. host `192.168.10.1`, Jetson `192.168.10.2`.
+
+**1. Jetson - check OpenCV has GStreamer** (the RTSP input in `src/sources.py`
+needs it, and so does the optional RTP output in `src/sinks.py`):
+```
+python -c "import cv2; print(cv2.getBuildInformation())" | grep -i gstreamer   # must say YES
+```
+The pip `opencv-python` wheel is built without GStreamer. If it says NO, use
+JetPack's system OpenCV instead (`pip uninstall opencv-python`, with the venv
+created with `--system-site-packages`).
+
+**2. Host - publish the video:** `bash scripts/rtsp_server_host.sh data/vtest.avi`
+(fixed encoding settings, see the script). Check that it plays on the host
+itself first: `ffplay rtsp://127.0.0.1:8554/demo`.
+
+**3. Jetson - run the pipeline headless on the stream:**
+```
+python -m src.detect --source rtsp://192.168.10.1:8554/demo --no-display
+python scripts/infer_rfdetr_large_trt.py --engine models/rfdetr-large_fp32-strict.engine     --source rtsp://192.168.10.1:8554/demo --no-display
+```
+
+**Optional - send annotated video back to the host.** Add
+`--sink rtp://192.168.10.1:5000` to the Jetson command, and receive on the host
+(allow UDP port 5000 if a firewall is on):
+```
+ffplay -protocol_whitelist file,udp,rtp -fflags nobuffer -flags low_delay scripts/rtp_receiver.sdp
+```
+Sending happens in its own NVTX range, `output` (encode + send), which
+`scripts/analyze_nsys.py` reports next to decode / inference / draw. Encoding
+runs on the CPU (x264) unless the Jetson has a hardware encoder
+(`gst-inspect-1.0 nvv4l2h264enc` finds it -> `?encoder=nvenc`); `?bitrate=<kbit/s>`
+sets the bitrate (see `src/sinks.py`).
+
+Notes for measurements: decode time over RTSP differs from file input (hardware
+decode of a network stream), so use one input type for all final numbers and
+state it. The frozen experiment scripts (`infer_rfdetr_trt.py`,
+`infer_cuda_graph*.py`) have no `--sink`; they stay as they were run.
+
 ## RF-DETR
 
 The same pipeline can run Roboflow's RF-DETR (a DETR-style transformer
