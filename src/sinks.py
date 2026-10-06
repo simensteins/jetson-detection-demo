@@ -6,6 +6,11 @@ sends annotated video on to the mission console (operationally the Getac
 tablet; in the replica, the host PC). This module does that over the network:
 
 - rtp://<host>:<port>   -> H.264 over RTP/UDP to <host>:<port>
+- rtsp://<host>:<port>/<path> -> H.264 published to an RTSP server (e.g. mediamtx
+                         on the Jetson itself), which the mission console then
+                         pulls. Useful when the receiver's firewall blocks
+                         incoming connections: the receiver only connects out.
+                         Needs GStreamer's rtspclientsink (gstreamer1.0-rtsp).
 
 Optional query parameters, e.g. rtp://192.168.10.1:5000?bitrate=4000&encoder=x264:
 - bitrate   target bitrate in kbit/s (default 4000)
@@ -46,16 +51,29 @@ def rtp_pipeline(host: str, port: int, kbps: int, gop: int, encoder: str) -> str
             f"udpsink host={host} port={port} sync=false")
 
 
+def rtsp_pipeline(location: str, kbps: int, gop: int, encoder: str) -> str:
+    """Everything after the appsrc: encode, publish to an RTSP server over TCP."""
+    if encoder not in ENCODERS:
+        raise SystemExit(f"Unknown encoder {encoder!r}; expected one of {sorted(ENCODERS)}")
+    enc = ENCODERS[encoder].format(kbps=kbps, bps=kbps * 1000, gop=gop)
+    return f"{enc} ! h264parse config-interval=-1 ! rtspclientsink location={location} protocols=tcp"
+
+
 def open_sink(spec: str, width: int, height: int, fps: float):
     """Open a writer for frames of size (width, height). One keyframe per second."""
     u = urlparse(str(spec))
-    if u.scheme != "rtp" or not u.hostname or not u.port:
-        raise SystemExit(f"Unsupported sink {spec!r}; expected rtp://<host>:<port>")
+    if u.scheme not in ("rtp", "rtsp") or not u.hostname or not u.port:
+        raise SystemExit(f"Unsupported sink {spec!r}; expected rtp://<host>:<port> "
+                         "or rtsp://<host>:<port>/<path>")
     q = parse_qs(u.query)
     kbps = int(q.get("bitrate", ["4000"])[0])
     encoder = q.get("encoder", ["x264"])[0]
     fps = fps if fps and fps > 0 else 30.0
-    rest = rtp_pipeline(u.hostname, u.port, kbps, max(1, round(fps)), encoder)
+    gop = max(1, round(fps))
+    if u.scheme == "rtp":
+        rest = rtp_pipeline(u.hostname, u.port, kbps, gop, encoder)
+    else:
+        rest = rtsp_pipeline(f"rtsp://{u.hostname}:{u.port}{u.path}", kbps, gop, encoder)
     if gstreamer.available():
         writer = gstreamer.GstWriter(rest, width, height, fps)
         pipeline = writer.description
