@@ -15,15 +15,17 @@ Optional query parameters, e.g. rtp://192.168.10.1:5000?bitrate=4000&encoder=x26
 
 Receive on the host with scripts/rtp_receiver.sdp (see README "Replica setup").
 
-Needs an OpenCV build with GStreamer (JetPack's system OpenCV has it; the pip
-opencv-python wheel does not) - check with
-    python -c "import cv2; print(cv2.getBuildInformation())" | grep -i gstreamer
+Frames go through GStreamer directly (src/gstreamer.py, PyGObject) when it is
+available - the venv's pip opencv-python has no GStreamer support - and through
+OpenCV's GStreamer backend otherwise.
 """
 from __future__ import annotations
 
 from urllib.parse import parse_qs, urlparse
 
 import cv2
+
+from . import gstreamer
 
 ENCODERS = {
     # Software H.264 on the CPU, tuned for low latency.
@@ -36,14 +38,15 @@ ENCODERS = {
 
 
 def rtp_pipeline(host: str, port: int, kbps: int, gop: int, encoder: str) -> str:
+    """Everything after the appsrc: encode, packetize, send."""
     if encoder not in ENCODERS:
         raise SystemExit(f"Unknown encoder {encoder!r}; expected one of {sorted(ENCODERS)}")
     enc = ENCODERS[encoder].format(kbps=kbps, bps=kbps * 1000, gop=gop)
-    return (f"appsrc ! {enc} ! h264parse ! rtph264pay config-interval=1 pt=96 ! "
+    return (f"{enc} ! h264parse ! rtph264pay config-interval=1 pt=96 ! "
             f"udpsink host={host} port={port} sync=false")
 
 
-def open_sink(spec: str, width: int, height: int, fps: float) -> cv2.VideoWriter:
+def open_sink(spec: str, width: int, height: int, fps: float):
     """Open a writer for frames of size (width, height). One keyframe per second."""
     u = urlparse(str(spec))
     if u.scheme != "rtp" or not u.hostname or not u.port:
@@ -52,12 +55,17 @@ def open_sink(spec: str, width: int, height: int, fps: float) -> cv2.VideoWriter
     kbps = int(q.get("bitrate", ["4000"])[0])
     encoder = q.get("encoder", ["x264"])[0]
     fps = fps if fps and fps > 0 else 30.0
-    pipeline = rtp_pipeline(u.hostname, u.port, kbps, max(1, round(fps)), encoder)
-    writer = cv2.VideoWriter(pipeline, cv2.CAP_GSTREAMER, 0, fps, (width, height), True)
+    rest = rtp_pipeline(u.hostname, u.port, kbps, max(1, round(fps)), encoder)
+    if gstreamer.available():
+        writer = gstreamer.GstWriter(rest, width, height, fps)
+        pipeline = writer.description
+    else:
+        pipeline = f"appsrc ! {rest}"
+        writer = cv2.VideoWriter(pipeline, cv2.CAP_GSTREAMER, 0, fps, (width, height), True)
     if not writer.isOpened():
         raise SystemExit(
-            f"Could not open sink {spec!r}. Is this OpenCV built with GStreamer, and is the "
-            f"'{encoder}' encoder available? Pipeline was:\n  {pipeline}"
+            f"Could not open sink {spec!r}. Is GStreamer available (PyGObject, or OpenCV built "
+            f"with GStreamer), and is the '{encoder}' encoder installed? Pipeline was:\n  {pipeline}"
         )
     print(f"sink: {spec} ({width}x{height} @ {fps:.1f} fps, {encoder}, {kbps} kbit/s)")
     return writer
