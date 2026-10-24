@@ -1,0 +1,19 @@
+Ranking from reports/rfdetr_trt_graph_gpupre.sqlite (kernels inside 'inference', first 50 frames skipped, n=550); shares are of GPU kernel time inside 'inference' (18.540 ms/frame)
+
+*  1  23.3% (cum  23.3%)   21.0/frame  sm86_xmma_gemm_f32f32_tf32f32_f32_tn_n_tilesize128x256x32_stage2_warpsize2x4x1_tensor16x8x8_execute_kernel_trt
+*  2  14.1% (cum  37.4%)   26.0/frame  sm80_xmma_gemm_f32f32_tf32f32_f32_tn_n_tilesize128x128x16_stage4_warpsize2x2x1_tensor16x8x8_execute_kernel_trt
+*  3   6.1% (cum  43.5%)    9.0/frame  sm80_xmma_gemm_f32f32_f32f32_f32_tn_n_tilesize64x32x8_stage3_warpsize1x2x1_ffma_aligna4_alignc4_execute_kernel_trt
+*  4   5.2% (cum  48.7%)   12.0/frame  __myl_DivErfAddMulMul_0x5c62dfe219d7c7d487c6f859714c39b4
+*  5   4.3% (cum  53.0%)    9.0/frame  sm80_xmma_gemm_f32f32_f32f32_f32_nn_n_tilesize32x64x8_stage3_warpsize1x2x1_ffma_aligna4_alignc4_execute_kernel_trt
+   6   4.1% (cum  57.1%)    3.0/frame  sm86_xmma_gemm_f32f32_tf32f32_f32_tn_n_tilesize128x64x32_stage4_warpsize2x2x1_tensor16x8x8_execute_kernel_trt
+   7   3.7% (cum  60.8%)    3.0/frame  sm86_xmma_gemm_f32f32_tf32f32_f32_tn_n_tilesize128x64x64_stage2_warpsize2x2x1_tensor16x8x8_execute_kernel_trt
+   8   3.6% (cum  64.4%)    9.0/frame  __myl_MaxrSubExpSumDivMul_0xb78cff1a04854c749196df10ed81fff7
+   9   2.9% (cum  67.3%)    1.0/frame  sm80_xmma_fprop_implicit_gemm_indexed_f32f32_f32f32_f32_nchwkcrs_nchw_tilesize64x64x8_stage3_warpsize1x4x1_g1_ffma_aligna4_alignc4_execute_kernel_trt
+  10   2.9% (cum  70.2%)    3.0/frame  __myl_MaxrSubExpSumDivMul_0xc855c553ad4e3d702a22e0c32f75f3fd
+  11   2.7% (cum  72.9%)   12.0/frame  sm86_xmma_gemm_f32f32_tf32f32_f32_tn_n_tilesize128x128x32_stage3_warpsize2x2x1_tensor16x8x8_execute_kernel_trt
+  12   2.5% (cum  75.5%)    3.0/frame  sm86_xmma_gemm_f32f32_tf32f32_f32_nn_n_tilesize128x128x16_stage3_warpsize2x2x1_tensor16x8x8_execute_kernel_trt
+  13   2.4% (cum  77.8%)    6.0/frame  sm80_xmma_fprop_implicit_gemm_f32f32_tf32f32_f32_nhwckrsc_nchw_tilesize128x128x16_stage4_warpsize2x2x1_g1_tensor16x8x8_t1r3s3_alignc4_execute_kernel_trt
+  14   1.7% (cum  79.5%)    8.0/frame  __myl_MulAddMeanSubMulMeanAddSqrtDivMulMulAdd_0x800ad199413272eddb243317d2767a7a
+  15   1.6% (cum  81.1%)    2.0/frame  sm80_xmma_fprop_implicit_gemm_f32f32_tf32f32_f32_nchwkrsc_nchw_tilesize128x128x16_stage4_warpsize2x2x1_g1_tensor16x8x8_simple_t1r1s1_aligna4_alignc4_execute_kernel_trt
+
+Selected (*): ranks [1, 2, 3, 4, 5], together 53.0% of GPU kernel time inside 'inference'

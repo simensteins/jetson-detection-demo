@@ -1,0 +1,12 @@
+# m15_fast_detector (experiment "best-detector-fast-m15", best.pt EMA weights),
+# reconstructed as an Ultralytics model (models/m15/yolo11s-p2-m15.yaml,
+# scripts/build_m15_pt.py) and exported to TensorRT (scripts/export_m15.py).
+# One class (SAR/IR target), 1-channel grayscale input, detection strides 4/8/16/32.
+model: models/m15/m15_fast_fp32-tf32.engine # built on this Jetson with trtexec (TF32 matmuls)
+source: data/vtest.avi # 768x576 @ 10 fps (first test video)
+conf: 0.25 # confidence threshold
+iou: 0.7 # NMS IoU threshold (Ultralytics predict default)
+imgsz: 1920 # m15 training image size; the engine input is fixed at 960x960 (grayscale)
+display: true # show the annotated window on the Jetson's monitor (--no-display overrides)
+max_frames: 600 # profiling-run cap, as in the other experiments
+warmup_frames: 50 # frames to exclude from the FPS timer

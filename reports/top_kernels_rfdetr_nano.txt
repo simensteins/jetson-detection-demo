@@ -1,0 +1,36 @@
+=== GPU kernels inside 'inference' (skipped first 50 ranges as warm-up, n=550) ===
+kernel time 18.540 ms/frame, 292.0 launches/frame, 88 distinct kernel names
+
+ #  share    cum  ms/frame per frame  grid (blocks)  block     regs  kernel
+ 1  23.3%  23.3%     4.312      21.0             30    256      252  sm86_xmma_gemm_f32f32_tf32f32_f32_tn_n_tilesize128x256x32_stage2_warpsize2x4x1_tensor16x8x8_execute_kernel_trt
+ 2  14.1%  37.4%     2.619      26.0          15-48    128      242  sm80_xmma_gemm_f32f32_tf32f32_f32_tn_n_tilesize128x128x16_stage4_warpsize2x2x1_tensor16x8x8_execute_kernel_trt
+ 3   6.1%  43.5%     1.132       9.0            360     64      122  sm80_xmma_gemm_f32f32_f32f32_f32_tn_n_tilesize64x32x8_stage3_warpsize1x2x1_ffma_aligna4_alignc4_execute_kernel_trt
+ 4   5.2%  48.7%     0.964      12.0            435    256       40  __myl_DivErfAddMulMul_0x5c62dfe219d7c7d487c6f859714c39b4
+ 5   4.3%  53.0%     0.800       9.0            120     64      104  sm80_xmma_gemm_f32f32_f32f32_f32_nn_n_tilesize32x64x8_stage3_warpsize1x2x1_ffma_aligna4_alignc4_execute_kernel_trt
+ 6   4.1%  57.1%     0.756       3.0            300    128      164  sm86_xmma_gemm_f32f32_tf32f32_f32_tn_n_tilesize128x64x32_stage4_warpsize2x2x1_tensor16x8x8_execute_kernel_trt
+ 7   3.7%  60.8%     0.695       3.0             90    128      164  sm86_xmma_gemm_f32f32_tf32f32_f32_tn_n_tilesize128x64x64_stage2_warpsize2x2x1_tensor16x8x8_execute_kernel_trt
+ 8   3.6%  64.4%     0.666       9.0            870    128       26  __myl_MaxrSubExpSumDivMul_0xb78cff1a04854c749196df10ed81fff7
+ 9   2.9%  67.3%     0.538       1.0             54    128      168  sm80_xmma_fprop_implicit_gemm_indexed_f32f32_f32f32_f32_nchwkcrs_nchw_tilesize64x64x8_stage3_warpsize1x4x1_g1_ffma_aligna4_alignc4_execute_kernel_trt
+10   2.9%  70.2%     0.532       3.0           3480    128       24  __myl_MaxrSubExpSumDivMul_0xc855c553ad4e3d702a22e0c32f75f3fd
+11   2.7%  72.9%     0.503      12.0              6    128      242  sm86_xmma_gemm_f32f32_tf32f32_f32_tn_n_tilesize128x128x32_stage3_warpsize2x2x1_tensor16x8x8_execute_kernel_trt
+12   2.5%  75.5%     0.472       3.0             30    128      250  sm86_xmma_gemm_f32f32_tf32f32_f32_nn_n_tilesize128x128x16_stage3_warpsize2x2x1_tensor16x8x8_execute_kernel_trt
+13   2.4%  77.8%     0.439       6.0              5    128      238  sm80_xmma_fprop_implicit_gemm_f32f32_tf32f32_f32_nhwckrsc_nchw_tilesize128x128x16_stage4_warpsize2x2x1_g1_tensor16x8x8_t1r3s3_alignc4_execute_kernel_trt
+14   1.7%  79.5%     0.308       8.0            145    128       38  __myl_MulAddMeanSubMulMeanAddSqrtDivMulMulAdd_0x800ad199413272eddb243317d2767a7a
+15   1.6%  81.1%     0.296       2.0             10    128      254  sm80_xmma_fprop_implicit_gemm_f32f32_tf32f32_f32_nchwkrsc_nchw_tilesize128x128x16_stage4_warpsize2x2x1_g1_tensor16x8x8_simple_t1r1s1_aligna4_alignc4_execute_kernel_trt
+
+=== Suggested Nsight Compute filters (with --nvtx --nvtx-include "inference/") ===
+ 1 --kernel-name regex:'^sm86_xmma_gemm_f32f32_tf32f32_f32_tn_n_tilesize128x256x32_stage2_warpsize2x4x1_tensor16x8x8_execute_kernel_trt$' --launch-skip 1050 --launch-count 21
+ 2 --kernel-name regex:'^sm80_xmma_gemm_f32f32_tf32f32_f32_tn_n_tilesize128x128x16_stage4_warpsize2x2x1_tensor16x8x8_execute_kernel_trt$' --launch-skip 1300 --launch-count 26
+ 3 --kernel-name regex:'^sm80_xmma_gemm_f32f32_f32f32_f32_tn_n_tilesize64x32x8_stage3_warpsize1x2x1_ffma_aligna4_alignc4_execute_kernel_trt$' --launch-skip 450 --launch-count 9
+ 4 --kernel-name regex:'^__myl_DivErfAddMulMul_0x5c62dfe219d7c7d487c6f859714c39b4$' --launch-skip 600 --launch-count 12
+ 5 --kernel-name regex:'^sm80_xmma_gemm_f32f32_f32f32_f32_nn_n_tilesize32x64x8_stage3_warpsize1x2x1_ffma_aligna4_alignc4_execute_kernel_trt$' --launch-skip 450 --launch-count 9
+ 6 --kernel-name regex:'^sm86_xmma_gemm_f32f32_tf32f32_f32_tn_n_tilesize128x64x32_stage4_warpsize2x2x1_tensor16x8x8_execute_kernel_trt$' --launch-skip 150 --launch-count 3
+ 7 --kernel-name regex:'^sm86_xmma_gemm_f32f32_tf32f32_f32_tn_n_tilesize128x64x64_stage2_warpsize2x2x1_tensor16x8x8_execute_kernel_trt$' --launch-skip 150 --launch-count 3
+ 8 --kernel-name regex:'^__myl_MaxrSubExpSumDivMul_0xb78cff1a04854c749196df10ed81fff7$' --launch-skip 450 --launch-count 9
+ 9 --kernel-name regex:'^sm80_xmma_fprop_implicit_gemm_indexed_f32f32_f32f32_f32_nchwkcrs_nchw_tilesize64x64x8_stage3_warpsize1x4x1_g1_ffma_aligna4_alignc4_execute_kernel_trt$' --launch-skip 50 --launch-count 1
+10 --kernel-name regex:'^__myl_MaxrSubExpSumDivMul_0xc855c553ad4e3d702a22e0c32f75f3fd$' --launch-skip 150 --launch-count 3
+11 --kernel-name regex:'^sm86_xmma_gemm_f32f32_tf32f32_f32_tn_n_tilesize128x128x32_stage3_warpsize2x2x1_tensor16x8x8_execute_kernel_trt$' --launch-skip 600 --launch-count 12
+12 --kernel-name regex:'^sm86_xmma_gemm_f32f32_tf32f32_f32_nn_n_tilesize128x128x16_stage3_warpsize2x2x1_tensor16x8x8_execute_kernel_trt$' --launch-skip 150 --launch-count 3
+13 --kernel-name regex:'^sm80_xmma_fprop_implicit_gemm_f32f32_tf32f32_f32_nhwckrsc_nchw_tilesize128x128x16_stage4_warpsize2x2x1_g1_tensor16x8x8_t1r3s3_alignc4_execute_kernel_trt$' --launch-skip 300 --launch-count 6
+14 --kernel-name regex:'^__myl_MulAddMeanSubMulMeanAddSqrtDivMulMulAdd_0x800ad199413272eddb243317d2767a7a$' --launch-skip 400 --launch-count 8
+15 --kernel-name regex:'^sm80_xmma_fprop_implicit_gemm_f32f32_tf32f32_f32_nchwkrsc_nchw_tilesize128x128x16_stage4_warpsize2x2x1_g1_tensor16x8x8_simple_t1r1s1_aligna4_alignc4_execute_kernel_trt$' --launch-skip 100 --launch-count 2

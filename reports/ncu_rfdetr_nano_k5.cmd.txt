@@ -1,0 +1,3 @@
+k5 = rank 5: sm80_xmma_gemm_f32f32_f32f32_f32_nn_n_tilesize32x64x8_stage3_warpsize1x2x1_ffma_aligna4_alignc4_execute_kernel_trt
+share 4.3% of GPU kernel time inside 'inference', 9.00 launches/frame -> launch-skip 450, launch-count 9
+command: sudo /opt/nvidia/nsight-compute/2026.1.1/ncu --nvtx --nvtx-include inference/ --set full --clock-control none --kernel-name 'regex:^sm80_xmma_gemm_f32f32_f32f32_f32_nn_n_tilesize32x64x8_stage3_warpsize1x2x1_ffma_aligna4_alignc4_execute_kernel_trt$' --launch-skip 450 --launch-count 9 -f -o reports/ncu_rfdetr_nano_k5 /home/studenta/nsight-demo/jetson-detection-demo/.venv/bin/python scripts/infer_rfdetr_trt.py --engine models/rfdetr-nano_fp32.engine --preprocess gpu --no-display --max-frames 60
