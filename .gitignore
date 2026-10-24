@@ -15,6 +15,7 @@ data/*
 
 # Profiler output - keep locally (sqlite is regenerated from .nsys-rep with
 # `nsys export --type=sqlite`). Figures and CSV summaries go in git.
+reports/*
 *.sqlite
 *.nsys-rep
 *.ncu-rep
