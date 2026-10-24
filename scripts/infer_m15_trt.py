@@ -8,7 +8,8 @@ are comparable. The model is a yolo11s with an added P2 detection branch
 SAR/IR input, one class, trained at 960x960. Weights: best.pt, EMA
 (rebuilt by scripts/build_m15_pt.py, exported by scripts/export_m15.py).
 
-The engine input is static (1, 1, 960, 960) FP32; its output (1, 4+nc, N)
+The engine input is static (1, 1, 960, 960), FP32 or FP16 (an fp16 engine
+from scripts/export_m15.py --precision fp16 has FP16 I/O); its output (1, 4+nc, N)
 holds DFL-decoded xywh boxes in 960x960 input pixels and sigmoid class
 scores over the N anchors of the four strides - no NMS in the graph.
 
@@ -40,6 +41,9 @@ Usage (run from anywhere - the project root is added to sys.path below):
         --no-display --max-frames 600 --warmup-frames 50
     python3 scripts/infer_m15_trt.py --engine models/m15/m15_fast_fp32-tf32.engine \
         --max-frames 600 --warmup-frames 50   # with display, press q to quit
+    # FP16 engine - the same script, the dtypes are read from the engine:
+    python3 scripts/infer_m15_trt.py --engine models/m15/m15_fast_fp16.engine \
+        --no-display --max-frames 600 --warmup-frames 50
     # CPU preprocessing instead of GPU (same math, Ultralytics' placement):
     python3 scripts/infer_m15_trt.py --engine models/m15/m15_fast_fp32-tf32.engine \
         --preprocess cpu --no-display --max-frames 600 --warmup-frames 50
@@ -154,7 +158,12 @@ def postprocess(pred_out: torch.Tensor, conf: float, iou: float,
                 frame_hw: tuple[int, int]) -> torch.Tensor:
     """(1, 4+nc, N) engine output -> (M, 6) [x1, y1, x2, y2, score, cls] in
     source-frame pixels: confidence filter, class-agnostic NMS (nc=1),
-    top MAX_DET by score, letterbox undone and clipped to the frame."""
+    top MAX_DET by score, letterbox undone and clipped to the frame.
+
+    An FP16 engine output is cast to FP32 first (one small cast, 5 x N):
+    box areas reach 960*960 = 921,600, beyond FP16's max of 65,504, and NMS
+    computes areas and IoU in the tensor's dtype."""
+    pred_out = pred_out.float()  # no-op for an FP32 engine
     boxes_xywh = pred_out[0, :4].T  # (N, 4), input-pixel xywh
     scores = pred_out[0, 4]  # (N,), sigmoid already applied in the graph
     keep = scores > conf
@@ -250,9 +259,13 @@ def main() -> None:
 
     cpu_staging = torch.empty((h0, w0, 3), dtype=torch.uint8, pin_memory=True)
     gpu_raw = torch.empty((h0, w0, 3), dtype=torch.uint8, device="cuda")
+    # The GPU path computes in the engine's input dtype (FP16 for an fp16
+    # engine, so nothing is cast at the engine boundary). 0-255 pixel values
+    # are exact in FP16, and the weighted sum stays <= 1.0.
+    pre_dtype = input_buf.dtype
     # BT.601 weights with the /255 folded in, shaped to weight the C axis of (1, 3, h, w).
     gray_w = (torch.tensor(GRAY_BGR_WEIGHTS, dtype=torch.float32, device="cuda")
-              / 255.0).view(1, 3, 1, 1)
+              / 255.0).to(pre_dtype).view(1, 3, 1, 1)
     # The letterbox border is the same every frame: fill the whole input once,
     # then each frame writes only the image region (no per-frame pad + copy).
     input_buf.fill_(LETTERBOX_FILL)
@@ -269,7 +282,7 @@ def main() -> None:
             # (1920x1080 -> 960x540) the weighted sum runs on 4x fewer pixels.
             # The weighted sum is a broadcast multiply + sum, not a matmul
             # (`@ gray_w` ran as a cuBLAS gemv: ~4 ms per frame at 1920x1080).
-            img = gpu_raw.permute(2, 0, 1)[None].to(torch.float32)  # (1, 3, H0, W0), channels-last memory
+            img = gpu_raw.permute(2, 0, 1)[None].to(pre_dtype)  # (1, 3, H0, W0), channels-last memory
             img = F.interpolate(img, size=(new_h, new_w), mode="bilinear",
                                 align_corners=False, antialias=False)  # as cv2.resize
             input_region.copy_((img * gray_w).sum(dim=1, keepdim=True))
