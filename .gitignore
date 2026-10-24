@@ -1,6 +1,10 @@
 # Models: device-specific (.engine) or internal-only weights - keep locally
 models/*
 !models/.gitkeep
+# ...except architecture YAMLs (small text, needed to rebuild a model), e.g. models/m15/
+!models/*/
+models/*/*
+!models/*/*.yaml
 *.engine
 *.onnx
 *.pt

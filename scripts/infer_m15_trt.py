@@ -14,9 +14,9 @@ scores over the N anchors of the four strides - no NMS in the graph.
 
 Per-frame path:
 - Preprocessing (GPU, default): the BGR frame is uploaded through pinned memory,
-  converted to grayscale (BT.601 weights, as cv2.cvtColor), letterboxed to
-  960x960 (Ultralytics' letterbox semantics: scale to fit, centered pad, 114
-  fill) and divided by 255. Ultralytics' own predict() letterboxes on the CPU;
+  resized, converted to grayscale (BT.601 weights, as cv2.cvtColor) and divided
+  by 255, and written into the 960x960 letterbox (Ultralytics' letterbox
+  semantics: scale to fit, centered pad, 114 fill; the pad is filled once). Ultralytics' own predict() letterboxes on the CPU;
   here it runs on the GPU, mirroring the RF-DETR Large script's placement.
   --preprocess cpu runs the same pipeline in cv2/numpy on the CPU instead -
   the Ultralytics predict() placement - with a single upload per frame.
@@ -250,7 +250,13 @@ def main() -> None:
 
     cpu_staging = torch.empty((h0, w0, 3), dtype=torch.uint8, pin_memory=True)
     gpu_raw = torch.empty((h0, w0, 3), dtype=torch.uint8, device="cuda")
-    gray_w = torch.tensor(GRAY_BGR_WEIGHTS, dtype=torch.float32, device="cuda")
+    # BT.601 weights with the /255 folded in, shaped to weight the C axis of (1, 3, h, w).
+    gray_w = (torch.tensor(GRAY_BGR_WEIGHTS, dtype=torch.float32, device="cuda")
+              / 255.0).view(1, 3, 1, 1)
+    # The letterbox border is the same every frame: fill the whole input once,
+    # then each frame writes only the image region (no per-frame pad + copy).
+    input_buf.fill_(LETTERBOX_FILL)
+    input_region = input_buf[:, :, pad_t:pad_t + new_h, pad_l:pad_l + new_w]
 
     def preprocess(frame: np.ndarray) -> None:
         if args.preprocess == "cpu":
@@ -258,11 +264,15 @@ def main() -> None:
         else:
             cpu_staging.copy_(torch.from_numpy(frame))
             gpu_raw.copy_(cpu_staging, non_blocking=True)
-            gray = (gpu_raw.to(torch.float32).div_(255.0) @ gray_w)  # (H0, W0), BT.601
-            img = F.interpolate(gray[None, None], size=(new_h, new_w), mode="bilinear",
+            # Resize first, then grayscale. Both are linear, so the order doesn't
+            # change the result, but for a source larger than the letterbox
+            # (1920x1080 -> 960x540) the weighted sum runs on 4x fewer pixels.
+            # The weighted sum is a broadcast multiply + sum, not a matmul
+            # (`@ gray_w` ran as a cuBLAS gemv: ~4 ms per frame at 1920x1080).
+            img = gpu_raw.permute(2, 0, 1)[None].to(torch.float32)  # (1, 3, H0, W0), channels-last memory
+            img = F.interpolate(img, size=(new_h, new_w), mode="bilinear",
                                 align_corners=False, antialias=False)  # as cv2.resize
-            img = F.pad(img, (pad_l, pad_r, pad_t, pad_b), value=LETTERBOX_FILL)
-            input_buf.copy_(img)
+            input_region.copy_((img * gray_w).sum(dim=1, keepdim=True))
 
     stage = f"graph={'off' if args.no_graph else 'on'} preprocess={args.preprocess}"
     print(f"  stage: {stage}")
