@@ -2,3 +2,4 @@ stage,reports,frames,frame_time_ms,fps,total_inf_ms,pre_kernel_ms,kernel_exec_ms
 Baseline,reports/m15_v2_baseline.sqlite,550,52.663,18.989,49.978,4.06,43.891,1.713,3.427,0.315,41.942,5.134,36.808,244.536
 + CUDA Graph,reports/m15_v2_graph.sqlite,550,50.867,19.659,48.225,4.324,42.957,0.638,1.322,0.306,44.575,1.699,42.875,244.536
 + GPU preprocessing,reports/m15_v2_gpupre.sqlite,550,49.728,20.109,47.1,1.59,44.49,0.734,1.558,0.286,44.774,1.386,43.388,248.664
++ FP16,reports/m15_v2_fp16.sqlite,550,24.831,40.272,22.178,1.557,19.577,0.758,3.418,0.286,19.824,1.249,18.574,209.664
