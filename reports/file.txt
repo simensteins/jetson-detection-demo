@@ -1,0 +1,30 @@
+(.venv) studenta@studenta:~/nsight-demo/jetson-detection-demo$ python3 scripts/inspect_autobackend.py yolov8n.engine
+Loading yolov8n.engine via Ultralytics (known-working path)...
+/home/studenta/nsight-demo/jetson-detection-demo/.venv/lib/python3.12/site-packages/torch/cuda/__init__.py:422: UserWarning: Found GPU0 Orin which is of compute capability (CC) 8.7.
+The following list shows the CCs this version of PyTorch was built for and the hardware CCs it supports:
+- 8.0 which supports hardware CC >=8.0,<9.0 except {8.7}
+- 9.0 which supports hardware CC >=9.0,<10.0
+- 10.0 which supports hardware CC >=10.0,<11.0 except {10.1}
+- 11.0 which supports hardware CC >=11.0,<12.0
+- 12.0 which supports hardware CC >=12.0,<13.0
+No published PyTorch CUDA builds for release 2.13.0+cu130 support this GPU. Visit https://pytorch.org/get-started/locally/ to find a compatible release.
+  _warn_unsupported_code(d, device_cc, code_ccs)
+Loading yolov8n.engine for TensorRT inference...
+[09/12/2026-19:56:51] [TRT] [I] Loaded engine size: 13 MiB
+[09/12/2026-19:56:51] [TRT] [I] [MemUsageChange] TensorRT-managed allocation in IExecutionContext creation: CPU +0, GPU +18, now: CPU 0, GPU 30 (MiB)
+
+backend type: <class 'ultralytics.nn.autobackend.AutoBackend'>
+
+backend attributes:
+['T_destination', 'add_module', 'apply', 'backend', 'bfloat16', 'buffers', 'call_super_init', 'children', 'compile', 'cpu', 'cuda', 'double', 'dump_patches', 'eval', 'extra_repr', 'float', 'format', 'forward', 'from_numpy', 'get_buffer', 'get_extra_state', 'get_parameter', 'get_submodule', 'half', 'ipu', 'load_state_dict', 'modules', 'mtia', 'named_buffers', 'named_children', 'named_modules', 'named_parameters', 'nhwc', 'parameters', 'register_backward_hook', 'register_buffer', 'register_forward_hook', 'register_forward_pre_hook', 'register_full_backward_hook', 'register_full_backward_pre_hook', 'register_load_state_dict_post_hook', 'register_load_state_dict_pre_hook', 'register_module', 'register_parameter', 'register_state_dict_post_hook', 'register_state_dict_pre_hook', 'requires_grad_', 'set_extra_state', 'set_submodule', 'share_memory', 'state_dict', 'to', 'to_empty', 'train', 'training', 'type', 'warmup', 'xpu', 'zero_grad']
+
+context: <class 'tensorrt.tensorrt.IExecutionContext'> = <tensorrt.tensorrt.IExecutionContext object at 0xfffec8285ff0>
+
+bindings: <class 'collections.OrderedDict'> = OrderedDict({'images': Binding(name='images', dtype=<class 'numpy.float32'>, shape=(1, 3, 640, 640), data=tensor([[[[0., 0., 0.,  ..., 0., 0., 0.],
+          [0., 0., 0.,  ..., 0., 0., 0.],
+          
+
+model: <class 'tensorrt.tensorrt.ICudaEngine'> = <tensorrt.tensorrt.ICudaEngine object at 0xfffec9f20270>
+
+output_names: <class 'list'> = ['output0']
+

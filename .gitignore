@@ -1,0 +1,26 @@
+# Models: device-specific (.engine) or internal-only weights - keep locally
+models/*
+!models/.gitkeep
+*.engine
+*.onnx
+*.pt
+*.pth
+
+# Data / video - keep locally
+data/*
+!data/.gitkeep
+*.mkv
+*.mp4
+*.avi
+
+# Profiler output - keep locally (sqlite is regenerated from .nsys-rep with
+# `nsys export --type=sqlite`). Figures and CSV summaries go in git.
+*.sqlite
+*.nsys-rep
+*.ncu-rep
+
+# Junk
+.venv/
+__pycache__/
+.DS_Store
+.scratch/
