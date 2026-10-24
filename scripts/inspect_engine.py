@@ -32,7 +32,7 @@ def inspect_with_ultralytics(path: str) -> None:
         keep = {k: meta[k] for k in ("args", "imgsz", "task", "batch", "date", "version") if k in meta}
         print(f"  Ultralytics metadata: {keep}")
     for name, b in backend.bindings.items():
-        mode = "INPUT" if name in getattr(backend, "input_names", [name]) else "OUTPUT"
+        mode = "OUTPUT" if name in getattr(backend, "output_names", []) else "INPUT"
         print(f"  {mode:6s} {name!r:12s} shape={tuple(b.shape)} dtype={b.data.dtype}")
 
 
