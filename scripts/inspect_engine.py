@@ -14,6 +14,28 @@ import sys
 import tensorrt as trt
 
 
+def inspect_with_ultralytics(path: str) -> None:
+    """Fallback for Ultralytics-exported engines: a raw deserialize fails on
+    this TensorRT version with a "dispatch runtime" magic-tag mismatch (see
+    scripts/infer_cuda_graph.py), while Ultralytics' AutoBackend loads the
+    same file - so let it load the engine and print its bindings."""
+    try:
+        import torch
+        from ultralytics.nn.autobackend import AutoBackend
+        backend = AutoBackend(path, device=torch.device("cuda:0"))
+    except Exception as e:  # noqa: BLE001 - report any load failure as-is
+        print(f"{path}: could not deserialize, and Ultralytics could not load it either: {e}")
+        return
+    print(f"{path}: (loaded via Ultralytics AutoBackend)")
+    meta = getattr(backend, "metadata", None)
+    if meta:
+        keep = {k: meta[k] for k in ("args", "imgsz", "task", "batch", "date", "version") if k in meta}
+        print(f"  Ultralytics metadata: {keep}")
+    for name, b in backend.bindings.items():
+        mode = "INPUT" if name in getattr(backend, "input_names", [name]) else "OUTPUT"
+        print(f"  {mode:6s} {name!r:12s} shape={tuple(b.shape)} dtype={b.data.dtype}")
+
+
 def main() -> None:
     if len(sys.argv) < 2:
         raise SystemExit("usage: inspect_engine.py <file.engine> [...]")
@@ -21,7 +43,8 @@ def main() -> None:
     for path in sys.argv[1:]:
         with open(path, "rb") as f:
             data = f.read()
-        # Ultralytics prefixes its engines with a 4-byte length + JSON metadata.
+        # trtexec engines (e.g. M15) load directly; Ultralytics prefixes its
+        # engines with a 4-byte length + JSON metadata.
         engine = runtime.deserialize_cuda_engine(data)
         if engine is None and len(data) > 4:
             meta_len = int.from_bytes(data[:4], byteorder="little")
@@ -29,7 +52,7 @@ def main() -> None:
             if engine is not None:
                 print(f"{path}: Ultralytics metadata: {data[4:4 + meta_len].decode(errors='replace')}")
         if engine is None:
-            print(f"{path}: could not deserialize")
+            inspect_with_ultralytics(path)
             continue
         print(f"{path}:")
         for i in range(engine.num_io_tensors):
