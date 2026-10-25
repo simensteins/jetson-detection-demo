@@ -1,0 +1,26 @@
+/home/studenta/nsight-demo/jetson-detection-demo/.venv/lib/python3.12/site-packages/torch/cuda/__init__.py:422: UserWarning: Found GPU0 Orin which is of compute capability (CC) 8.7.
+The following list shows the CCs this version of PyTorch was built for and the hardware CCs it supports:
+- 8.0 which supports hardware CC >=8.0,<9.0 except {8.7}
+- 9.0 which supports hardware CC >=9.0,<10.0
+- 10.0 which supports hardware CC >=10.0,<11.0 except {10.1}
+- 11.0 which supports hardware CC >=11.0,<12.0
+- 12.0 which supports hardware CC >=12.0,<13.0
+No published PyTorch CUDA builds for release 2.13.0+cu130 support this GPU. Visit https://pytorch.org/get-started/locally/ to find a compatible release.
+  _warn_unsupported_code(d, device_cc, code_ccs)
+Loading yolov8n.engine via Ultralytics (known-working path)...
+Loading yolov8n.engine for TensorRT inference...
+[10/25/2026-15:25:32] [TRT] [I] Loaded engine size: 13 MiB
+[10/25/2026-15:25:32] [TRT] [W] Using an engine plan file across different models of devices is not supported and is likely to affect performance or even cause errors or deadlock.
+[10/25/2026-15:25:32] [TRT] [I] [MemUsageChange] TensorRT-managed allocation in IExecutionContext creation: CPU +0, GPU +18, now: CPU 0, GPU 30 (MiB)
+  input  'images' shape=(1, 3, 640, 640)
+  output 'output0' shape=(1, 84, 8400)
+  source frame: 1920x1080 -> letterbox scale=0.3333 new_hw=(360, 640) pad_lrtb=(0, 0, 140, 140)
+Capturing CUDA graph...
+Graph captured. Starting inference loop.
+processed 550 frames in 7.9s (after 50-frame warm-up)  ->  69.4 FPS
+Collecting data...
+Generating '/tmp/nsys-report-0dcf.qdstrm'
+Press Ctrl-C to stop symbol files downloading
+[1/1] [0%                          ] paper25w_yolo_gpupre.nsys-rep[1/1] [0%                          ] paper25w_yolo_gpupre.nsys-rep[1/1] [8%                          ] paper25w_yolo_gpupre.nsys-rep[1/1] [7%                          ] paper25w_yolo_gpupre.nsys-rep[1/1] [11%                         ] paper25w_yolo_gpupre.nsys-rep[1/1] [14%                         ] paper25w_yolo_gpupre.nsys-rep[1/1] [==18%                       ] paper25w_yolo_gpupre.nsys-rep[1/1] [===23%                      ] paper25w_yolo_gpupre.nsys-rep[1/1] [====27%                     ] paper25w_yolo_gpupre.nsys-rep[1/1] [=====31%                    ] paper25w_yolo_gpupre.nsys-rep[1/1] [======35%                   ] paper25w_yolo_gpupre.nsys-rep[1/1] [=======36%                  ] paper25w_yolo_gpupre.nsys-rep[1/1] [========40%                 ] paper25w_yolo_gpupre.nsys-rep[1/1] [=========44%                ] paper25w_yolo_gpupre.nsys-rep[1/1] [==========48%               ] paper25w_yolo_gpupre.nsys-rep[1/1] [===========50%              ] paper25w_yolo_gpupre.nsys-rep[1/1] [===========51%              ] paper25w_yolo_gpupre.nsys-rep[1/1] [===========53%              ] paper25w_yolo_gpupre.nsys-rep[1/1] [============54%             ] paper25w_yolo_gpupre.nsys-rep[1/1] [============55%             ] paper25w_yolo_gpupre.nsys-rep[1/1] [============56%             ] paper25w_yolo_gpupre.nsys-rep[1/1] [============57%             ] paper25w_yolo_gpupre.nsys-rep[1/1] [========================100%] paper25w_yolo_gpupre.nsys-rep[1/1] [========================100%] paper25w_yolo_gpupre.nsys-rep
+Generated:
+	/home/studenta/nsight-demo/jetson-detection-demo/reports/paper25w_yolo_gpupre.nsys-rep

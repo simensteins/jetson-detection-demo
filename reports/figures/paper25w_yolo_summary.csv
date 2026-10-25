@@ -1,0 +1,6 @@
+stage,reports,frames,frame_time_ms,fps,total_inf_ms,pre_kernel_ms,kernel_exec_ms,idle_gap_ms,idle_gap_pct,post_kernel_ms,dispatch_ms,active_dispatch_ms,blocked_ms,kernel_count
+Baseline,reports/nsys_paper_reports/paper25w_yolo_baseline.sqlite,550,20.192,49.524,16.922,3.732,8.377,3.575,21.127,1.238,8.213,4.188,4.024,186.096
++ CUDA Graph,reports/nsys_paper_reports/paper25w_yolo_graph.sqlite,550,17.66,56.626,14.492,5.9,7.74,0.712,4.912,0.14,8.054,2.001,6.053,181.675
++ GPU preprocessing,reports/nsys_paper_reports/paper25w_yolo_gpupre.sqlite,550,14.393,69.477,11.329,1.486,8.849,0.854,7.538,0.14,7.51,1.547,5.963,187.675
++ Custom NMS,reports/nsys_paper_reports/paper25w_yolo_nms.sqlite,550,13.746,72.746,11.027,1.662,9.158,0.074,0.67,0.133,4.97,2.489,2.481,220
++ FP16,reports/nsys_paper_reports/paper25w_yolo_fp16.sqlite,550,11.535,86.694,8.835,1.661,5.009,1.897,21.471,0.267,2.55,2.55,0.0,189
