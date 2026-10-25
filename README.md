@@ -5,6 +5,10 @@ Jetson Orin Nano, reading a video source, drawing boxes on a monitor, and
 profiled with Nsight Systems. Built so the data feed and model can later be
 swapped for the real (prod) pipeline.
 
+## Documentation
+
+All project documentation lives in [`docs/`](docs/README.md): final results ([docs/results-paper25w.md](docs/results-paper25w.md)), the measurement protocol, every optimization iteration for YOLOv8n and M15, research notes, the paper outline and meeting notes.
+
 ## Structure
 
 ```
