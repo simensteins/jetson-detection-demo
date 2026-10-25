@@ -21,7 +21,7 @@ this from the repo root, after the standard nsys profiling runs have produced
 those files (see any iteration script's docstring for the profiling command).
 
 Usage:
-    python3 scripts/plot_paper_figures.py [--outdir reports/figures]
+    python3 scripts/plot_paper_figures.py [--outdir reports/figures/yolov8n_vtest_2026-09]
 """
 from __future__ import annotations
 
@@ -322,7 +322,8 @@ def save(fig, outdir: Path, name: str) -> None:
 
 def main() -> None:
     p = argparse.ArgumentParser(description="Generate publication-ready figures for the paper/report")
-    p.add_argument("--outdir", default="reports/figures", help="Output directory for PNG/PDF figures")
+    p.add_argument("--outdir", default="reports/figures/yolov8n_vtest_2026-09",
+                   help="Output directory for PNG/PDF figures (default: where this set lives)")
     p.add_argument("--reports-dir", default="reports", help="Directory containing the .sqlite nsys reports")
     args = p.parse_args()
 
