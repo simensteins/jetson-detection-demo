@@ -47,6 +47,13 @@ Common flags: `--config configs/default.yaml --source <file|rtsp://...> --no-dis
 
 Figures live in `reports/figures/<set>/`; see [`reports/figures/README.md`](../reports/figures/README.md).
 
+## Accuracy evaluation (on the Jetson)
+
+| Script | What |
+|---|---|
+| `bash scripts/download_coco_val.sh` | COCO val2017 images + annotations into `data/coco/` (~1 GB download) |
+| `scripts/eval_yolo_coco.py [--max-images N] [--pipelines ...]` | mAP, P/R at conf 0.25 and agreement with the baseline for each YOLOv8n stage (baseline, gpupre, customnms, fp16, plus fp16_ultranms to isolate FP16). Needs `pip install pycocotools`. Results: `reports/eval/yolo_coco_summary.csv` / `.md` |
+
 ## Sources and sinks
 `src/sources.py` (files, webcams, `rtsp://` via hardware decoding), `src/sinks.py` / `src/gstreamer.py` (`--sink rtp://...` / `rtsp://...` sends the annotated video on), `scripts/rtsp_server_mac.sh` (stream a file from the Mac).
 
