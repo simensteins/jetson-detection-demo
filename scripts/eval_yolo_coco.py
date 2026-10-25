@@ -38,17 +38,27 @@ Accuracy does not depend on clocks or power mode, so this can run with the
 desktop up. Needs: pip install pycocotools; COCO val2017 in data/coco
 (bash scripts/download_coco_val.sh).
 
+Every run also splits the results by how many labelled objects an image has
+(0, 1-3, 4-10, >10), because the custom NMS mainly loses boxes in crowded
+scenes; --max-objects N keeps only images with at most N objects (e.g. 10,
+the most targets expected per frame in production; images with no objects
+stay in, as empty frames are the common case there and show false alarms).
+
 Usage (on the Jetson, from the repo root):
     python3 scripts/eval_yolo_coco.py --max-images 200            # quick check
     python3 scripts/eval_yolo_coco.py                               # all 5000 images, all pipelines
+    python3 scripts/eval_yolo_coco.py --max-objects 10              # only images with <= 10 objects
     python3 scripts/eval_yolo_coco.py --pipelines baseline fp16
-Writes reports/eval/yolo_coco_summary.csv (+ .md) and the raw detections per
-pipeline (reports/eval/yolo_coco_<pipeline>_dets.json).
+Writes reports/eval/yolo_coco[_max<N>obj]_summary.csv (+ .md), the same split by
+object count in ..._buckets.csv (+ .md), and the raw detections per pipeline
+(..._<pipeline>_dets.json).
 """
 from __future__ import annotations
 
 import argparse
+import contextlib
 import csv
+import io
 import json
 import sys
 import time
@@ -68,6 +78,7 @@ from ultralytics import YOLO  # noqa: E402
 from ultralytics.data.converter import coco80_to_coco91_class  # noqa: E402
 
 PIPELINES = ["baseline", "gpupre", "customnms", "fp16", "fp16_ultranms"]
+BUCKETS = [("0", 0, 0), ("1-3", 1, 3), ("4-10", 4, 10), (">10", 11, 10**9)]  # labelled objects per image
 IMGSZ = 640
 EVAL_CONF = 0.001
 DEPLOY_CONF = 0.25
@@ -83,6 +94,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--engine-fp16", default="yolov8n_fp16_io.engine")
     p.add_argument("--pipelines", nargs="+", default=PIPELINES, choices=PIPELINES)
     p.add_argument("--max-images", type=int, default=0, help="0 = all images")
+    p.add_argument("--max-objects", type=int, default=0,
+                   help="Only images with at most this many labelled (non-crowd) objects; 0 = no limit")
     p.add_argument("--outdir", default="reports/eval")
     return p.parse_args()
 
@@ -191,8 +204,17 @@ def main() -> None:
         raise SystemExit(f"{args.annotations} not found - run: bash scripts/download_coco_val.sh")
     gt = COCO(args.annotations)
     img_ids = sorted(gt.getImgIds())
+    n_objects = {iid: len(gt.getAnnIds(imgIds=iid, iscrowd=False)) for iid in img_ids}
+    if args.max_objects:
+        img_ids = [i for i in img_ids if n_objects[i] <= args.max_objects]
     if args.max_images:
         img_ids = img_ids[:args.max_images]
+    tag = f"_max{args.max_objects}obj" if args.max_objects else ""
+    buckets = [(name, [i for i in img_ids if lo <= n_objects[i] <= hi])
+               for name, lo, hi in BUCKETS]
+    buckets = [(name, ids) for name, ids in buckets if ids]
+    print(f"{len(img_ids)} images; by labelled objects: "
+          + ", ".join(f"{name}: {len(ids)}" for name, ids in buckets), flush=True)
     cat91 = coco80_to_coco91_class()
     cat80 = {c: i for i, c in enumerate(cat91)}
 
@@ -217,7 +239,7 @@ def main() -> None:
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
     all_dets: dict[str, dict[int, np.ndarray]] = {}
-    rows = []
+    rows, bucket_rows = [], []
     for pipeline in args.pipelines:
         t0 = time.perf_counter()
         dets_by_img, coco_dets = {}, []
@@ -233,55 +255,89 @@ def main() -> None:
             if (k + 1) % 500 == 0:
                 print(f"  {pipeline}: {k + 1}/{len(img_ids)}", flush=True)
         all_dets[pipeline] = dets_by_img
-        (outdir / f"yolo_coco_{pipeline}_dets.json").write_text(json.dumps(coco_dets))
+        (outdir / f"yolo_coco{tag}_{pipeline}_dets.json").write_text(json.dumps(coco_dets))
+        res = gt.loadRes(coco_dets) if coco_dets else None
 
-        ev = COCOeval(gt, gt.loadRes(coco_dets) if coco_dets else COCO(), "bbox")
-        ev.params.imgIds = img_ids
-        ev.evaluate(); ev.accumulate(); ev.summarize()
-        s = ev.stats
+        def coco_map(ids, verbose=False):
+            if res is None or not any(n_objects[i] for i in ids):
+                return [float("nan")] * 12
+            ev = COCOeval(gt, res, "bbox")
+            ev.params.imgIds = ids
+            with contextlib.redirect_stdout(sys.stdout if verbose else io.StringIO()):
+                ev.evaluate(); ev.accumulate(); ev.summarize()
+            return [v if v >= 0 else float("nan") for v in ev.stats]  # COCO's -1 = no such objects
 
-        tp = fp = fn = 0
-        for iid in img_ids:
-            p = dets_by_img[iid]; p = p[p[:, 4] >= DEPLOY_CONF]
-            m = greedy_matches(p, gt_boxes[iid])
-            tp += m; fp += len(p) - m; fn += len(gt_boxes[iid]) - m
-        prec = tp / max(tp + fp, 1); rec = tp / max(tp + fn, 1)
+        def deploy_metrics(ids):
+            tp = fp = fn = 0
+            for iid in ids:
+                p = dets_by_img[iid]; p = p[p[:, 4] >= DEPLOY_CONF]
+                m = greedy_matches(p, gt_boxes[iid])
+                tp += m; fp += len(p) - m; fn += len(gt_boxes[iid]) - m
+            nan = float("nan")
+            prec = tp / (tp + fp) if tp + fp else nan  # no detections: undefined
+            rec = tp / (tp + fn) if tp + fn else nan  # no labelled objects: undefined
+            out = dict(precision_025=100 * prec, recall_025=100 * rec,
+                       f1_025=100 * 2 * prec * rec / (prec + rec) if prec + rec > 0 else nan,
+                       fp_per_img_025=fp / len(ids),
+                       dets_per_img_025=sum(int((dets_by_img[i][:, 4] >= DEPLOY_CONF).sum())
+                                            for i in ids) / len(ids))
+            if "baseline" in all_dets and pipeline != "baseline":
+                kept = found = n_base = n_this = 0
+                for iid in ids:
+                    b = all_dets["baseline"][iid]; b = b[b[:, 4] >= DEPLOY_CONF]
+                    p = dets_by_img[iid]; p = p[p[:, 4] >= DEPLOY_CONF]
+                    kept += greedy_matches(b, p); found += greedy_matches(p, b)
+                    n_base += len(b); n_this += len(p)
+                out["baseline_dets_kept_025"] = 100 * kept / max(n_base, 1)
+                out["dets_also_in_baseline_025"] = 100 * found / max(n_this, 1)
+            return out
+
+        s = coco_map(img_ids, verbose=True)
         row = dict(pipeline=pipeline, images=len(img_ids), mAP50_95=100 * s[0], mAP50=100 * s[1],
                    mAP_small=100 * s[3], mAP_medium=100 * s[4], mAP_large=100 * s[5],
-                   precision_025=100 * prec, recall_025=100 * rec,
-                   f1_025=100 * 2 * prec * rec / max(prec + rec, 1e-9),
-                   dets_per_img_025=sum(int((all_dets[pipeline][i][:, 4] >= DEPLOY_CONF).sum())
-                                        for i in img_ids) / len(img_ids),
-                   seconds=time.perf_counter() - t0)
-        if "baseline" in all_dets and pipeline != "baseline":
-            kept = found = n_base = n_this = 0
-            for iid in img_ids:
-                b = all_dets["baseline"][iid]; b = b[b[:, 4] >= DEPLOY_CONF]
-                p = dets_by_img[iid]; p = p[p[:, 4] >= DEPLOY_CONF]
-                kept += greedy_matches(b, p); found += greedy_matches(p, b)
-                n_base += len(b); n_this += len(p)
-            row["baseline_dets_kept_025"] = 100 * kept / max(n_base, 1)
-            row["dets_also_in_baseline_025"] = 100 * found / max(n_this, 1)
+                   **deploy_metrics(img_ids), seconds=time.perf_counter() - t0)
         rows.append(row)
+        for name, ids in buckets:
+            sb = coco_map(ids)
+            bucket_rows.append(dict(pipeline=pipeline, objects=name, images=len(ids),
+                                    mAP50_95=100 * sb[0], mAP50=100 * sb[1], **deploy_metrics(ids)))
         print(f"  {pipeline}: mAP50-95 {row['mAP50_95']:.2f}  mAP50 {row['mAP50']:.2f}  "
               f"P/R@0.25 {row['precision_025']:.1f}/{row['recall_025']:.1f}  ({row['seconds']:.0f} s)", flush=True)
 
-    keys = ["pipeline", "images", "mAP50_95", "mAP50", "mAP_small", "mAP_medium", "mAP_large",
-            "precision_025", "recall_025", "f1_025", "dets_per_img_025",
-            "baseline_dets_kept_025", "dets_also_in_baseline_025", "seconds"]
-    with open(outdir / "yolo_coco_summary.csv", "w", newline="") as f:
-        w = csv.writer(f); w.writerow(keys)
-        for r in rows:
-            w.writerow([round(r[k], 3) if isinstance(r.get(k), float) else r.get(k, "") for k in keys])
-    md = ["| Pipeline | mAP50-95 | mAP50 | mAP small | P@0.25 | R@0.25 | F1@0.25 | baseline dets kept |",
-          "|---|---|---|---|---|---|---|---|"]
+    def write_csv(path, rows_, keys):
+        with open(path, "w", newline="") as f:
+            w = csv.writer(f); w.writerow(keys)
+            for r in rows_:
+                w.writerow([round(r[k], 3) if isinstance(r.get(k), float) else r.get(k, "") for k in keys])
+
+    fmt = lambda v, nd=2, unit="": "–" if v is None or v != v else f"{v:.{nd}f}{unit}"
+    write_csv(outdir / f"yolo_coco{tag}_summary.csv", rows,
+              ["pipeline", "images", "mAP50_95", "mAP50", "mAP_small", "mAP_medium", "mAP_large",
+               "precision_025", "recall_025", "f1_025", "fp_per_img_025", "dets_per_img_025",
+               "baseline_dets_kept_025", "dets_also_in_baseline_025", "seconds"])
+    md = ["| Pipeline | mAP50-95 | mAP50 | mAP small | P@0.25 | R@0.25 | F1@0.25 | FP/img@0.25 | baseline dets kept |",
+          "|---|---|---|---|---|---|---|---|---|"]
     for r in rows:
-        kept = f"{r['baseline_dets_kept_025']:.1f} %" if "baseline_dets_kept_025" in r else "–"
-        md.append(f"| {r['pipeline']} | {r['mAP50_95']:.2f} | {r['mAP50']:.2f} | {r['mAP_small']:.2f} | "
-                  f"{r['precision_025']:.1f} | {r['recall_025']:.1f} | {r['f1_025']:.1f} | {kept} |")
-    (outdir / "yolo_coco_summary.md").write_text("\n".join(md) + "\n")
-    print("\n" + "\n".join(md))
-    print(f"\nwrote {outdir}/yolo_coco_summary.csv and .md")
+        md.append(f"| {r['pipeline']} | {fmt(r['mAP50_95'])} | {fmt(r['mAP50'])} | {fmt(r['mAP_small'])} | "
+                  f"{fmt(r['precision_025'], 1)} | {fmt(r['recall_025'], 1)} | {fmt(r['f1_025'], 1)} | "
+                  f"{fmt(r['fp_per_img_025'])} | {fmt(r.get('baseline_dets_kept_025'), 1, ' %')} |")
+    (outdir / f"yolo_coco{tag}_summary.md").write_text("\n".join(md) + "\n")
+
+    write_csv(outdir / f"yolo_coco{tag}_buckets.csv", bucket_rows,
+              ["objects", "pipeline", "images", "mAP50_95", "mAP50", "precision_025", "recall_025",
+               "f1_025", "fp_per_img_025", "dets_per_img_025", "baseline_dets_kept_025",
+               "dets_also_in_baseline_025"])
+    bmd = ["| Objects in image | Pipeline | Images | mAP50-95 | mAP50 | P@0.25 | R@0.25 | FP/img@0.25 | baseline dets kept |",
+           "|---|---|---|---|---|---|---|---|---|"]
+    for name, _ in buckets:
+        for r in (b for b in bucket_rows if b["objects"] == name):
+            bmd.append(f"| {name} | {r['pipeline']} | {r['images']} | {fmt(r['mAP50_95'])} | {fmt(r['mAP50'])} | "
+                       f"{fmt(r['precision_025'], 1)} | {fmt(r['recall_025'], 1)} | {fmt(r['fp_per_img_025'])} | "
+                       f"{fmt(r.get('baseline_dets_kept_025'), 1, ' %')} |")
+    (outdir / f"yolo_coco{tag}_buckets.md").write_text("\n".join(bmd) + "\n")
+
+    print("\n" + "\n".join(md) + "\n\n" + "\n".join(bmd))
+    print(f"\nwrote {outdir}/yolo_coco{tag}_summary.csv/.md and yolo_coco{tag}_buckets.csv/.md")
 
 
 if __name__ == "__main__":

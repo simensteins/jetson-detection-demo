@@ -52,7 +52,7 @@ Figures live in `reports/figures/<set>/`; see [`reports/figures/README.md`](../r
 | Script | What |
 |---|---|
 | `bash scripts/download_coco_val.sh` | COCO val2017 images + annotations into `data/coco/` (~1 GB download) |
-| `scripts/eval_yolo_coco.py [--max-images N] [--pipelines ...]` | mAP, P/R at conf 0.25 and agreement with the baseline for each YOLOv8n stage (baseline, gpupre, customnms, fp16, plus fp16_ultranms to isolate FP16). Needs `pip install pycocotools`. Results: `reports/eval/yolo_coco_summary.csv` / `.md` |
+| `scripts/eval_yolo_coco.py [--max-images N] [--max-objects N] [--pipelines ...]` | mAP, P/R and false alarms per image at conf 0.25, and agreement with the baseline for each YOLOv8n stage (baseline, gpupre, customnms, fp16, plus fp16_ultranms to isolate FP16), overall and split by objects per image (0, 1–3, 4–10, >10). `--max-objects 10` keeps only images with at most 10 objects (the production scenario). Needs `pip install pycocotools`. Results: `reports/eval/yolo_coco[_max10obj]_summary.md` and `_buckets.md` (+ .csv) |
 
 ## Sources and sinks
 `src/sources.py` (files, webcams, `rtsp://` via hardware decoding), `src/sinks.py` / `src/gstreamer.py` (`--sink rtp://...` / `rtsp://...` sends the annotated video on), `scripts/rtsp_server_mac.sh` (stream a file from the Mac).
