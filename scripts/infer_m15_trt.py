@@ -27,7 +27,9 @@ Per-frame path:
   source-frame pixels. The boolean filter and keep.any() make the CPU wait
   on the GPU (~2-3 syncs per frame), and the number of kernels depends on
   how many candidates pass the threshold.
-- Postprocessing, --nms fixed: fixed-shape NMS as in the YOLOv8n Iteration 3
+- Postprocessing, --nms fixed: captured into the CUDA graph together with the
+  engine (eager with --no-graph), so a frame costs the same whether or not
+  anything is detected. Fixed-shape NMS as in the YOLOv8n Iteration 3
   (scripts/infer_cuda_graph_custom_nms.py) - top-K by score, K x K IoU
   matrix, no data-dependent shapes, so the only sync left is the final
   .cpu() - but Cluster-NMS instead of Iteration 3's Fast NMS: Fast NMS lets
@@ -90,11 +92,12 @@ LETTERBOX_FILL = 114 / 255.0  # Ultralytics letterbox fill, already normalized
 MAX_DET = 300  # Ultralytics predict() default
 # Default fixed top-K for --nms fixed (--nms-candidates). The torchvision path
 # runs NMS on EVERY box above the threshold, so K must exceed the candidates a
-# frame can have, or low-scored boxes are cut before NMS (each person yields
-# many anchors above threshold with the stride-4 head). K x K is the IoU
-# matrix, so K also sets the cost. A run reports the most candidates any frame
-# had and how many frames filled all K - use that to pick K.
-NMS_CANDIDATES = 1000
+# frame can have, or low-scored boxes are cut before NMS. K x K is the IoU
+# matrix, so K also sets the cost. 100: the test video never had more than 3
+# candidates per frame (paper set, k=1000 run), production expects at most ~10
+# targets. A run reports the most candidates any frame had and how many frames
+# filled all K - if any did, raise K.
+NMS_CANDIDATES = 100
 NMS_ITERS = 10  # Cluster-NMS passes for --nms fixed (see postprocess_fixed)
 
 
@@ -228,7 +231,7 @@ def box_iou_matrix(boxes_xyxy: torch.Tensor) -> torch.Tensor:
 
 
 def postprocess_fixed(pred_out: torch.Tensor, conf: float, iou: float,
-                      gain: float, pad_lt: tuple[float, float],
+                      gain: float, pad_xyxy: torch.Tensor,
                       frame_hw: tuple[int, int], k: int = NMS_CANDIDATES
                       ) -> tuple[torch.Tensor, torch.Tensor]:
     """(1, 4+nc, N) engine output -> FIXED (k, 6)
@@ -236,6 +239,9 @@ def postprocess_fixed(pred_out: torch.Tensor, conf: float, iou: float,
     same shape and the same kernels: no boolean filtering, no .any(), so the
     CPU never waits on the GPU here. Rows that are not detections have
     score 0 - the caller filters them on the CPU after the single .cpu().
+    Nothing here waits on the GPU or copies from the CPU (the letterbox pad
+    comes in as a GPU tensor, pad_xyxy = [left, top, left, top]), so the whole
+    function can be captured into the CUDA graph together with the engine.
     Also returns `stats`, a (3,) FP32 tensor, so a run can report (without
     extra syncs) whether the fixed sizes were ever too small:
       [0] candidates   boxes above the threshold among the top k (= k means
@@ -268,8 +274,7 @@ def postprocess_fixed(pred_out: torch.Tensor, conf: float, iou: float,
     keep = keep & (keep.cumsum(0) <= MAX_DET)  # at most MAX_DET, highest scores first
     scores = torch.where(keep, topk_scores, torch.zeros_like(topk_scores))
 
-    boxes_xyxy = (boxes_xyxy - torch.tensor([pad_lt[0], pad_lt[1], pad_lt[0], pad_lt[1]],
-                                            device=pred_out.device)) / gain
+    boxes_xyxy = (boxes_xyxy - pad_xyxy) / gain
     h0, w0 = frame_hw
     boxes_xyxy[:, 0::2] = boxes_xyxy[:, 0::2].clamp_(0, w0 - 1)
     boxes_xyxy[:, 1::2] = boxes_xyxy[:, 1::2].clamp_(0, h0 - 1)
@@ -382,7 +387,9 @@ def main() -> None:
             input_region.copy_((img * gray_w).sum(dim=1, keepdim=True))
 
     stage = (f"graph={'off' if args.no_graph else 'on'} preprocess={args.preprocess} "
-             f"nms={args.nms}" + (f" k={args.nms_candidates}" if args.nms == "fixed" else ""))
+             f"nms={args.nms}" + (f" k={args.nms_candidates}"
+                                   + (" (eager)" if args.no_graph else " (in the CUDA graph)")
+                                   if args.nms == "fixed" else ""))
     print(f"  stage: {stage}")
 
     stream = torch.cuda.Stream()
@@ -396,14 +403,35 @@ def main() -> None:
             context.execute_async_v3(stream.cuda_stream)
         stream.synchronize()
 
+    # Letterbox pad as a GPU tensor, built once (postprocess_fixed must not
+    # copy from the CPU - that is not allowed inside a graph capture).
+    pad_xyxy = torch.tensor([pad_l, pad_t, pad_l, pad_t], dtype=torch.float32, device="cuda")
+
+    def run_fixed_nms() -> torch.Tensor:
+        """The fixed NMS + its stats as one flat tensor: (k*6 + 3,)."""
+        dets, stats = postprocess_fixed(pred_buf, conf, iou, r, pad_xyxy, (h0, w0),
+                                        k=args.nms_candidates)
+        return torch.cat([dets.flatten(), stats])
+
     graph = None
+    graph_out = None  # with --nms fixed: the graph's output, (k*6 + 3,)
     if not args.no_graph:
-        # --- capture the forward pass as a CUDA graph, once ---
+        if args.nms == "fixed":
+            # Warm the NMS ops up outside the capture (loads their kernels and
+            # sizes the allocator), as PyTorch recommends before capturing.
+            with torch.cuda.stream(stream):
+                for _ in range(3):
+                    run_fixed_nms()
+            stream.synchronize()
+        # --- capture the forward pass (and with --nms fixed, the NMS after
+        # it) as a CUDA graph, once ---
         print("Capturing CUDA graph...")
         graph = torch.cuda.CUDAGraph()
         with torch.cuda.graph(graph, stream=stream):
             context.execute_async_v3(stream.cuda_stream)
-        print("Graph captured.")
+            if args.nms == "fixed":
+                graph_out = run_fixed_nms()
+        print("Graph captured" + (" (engine + fixed NMS)." if graph_out is not None else "."))
     print("Starting inference loop.")
 
     sink = None
@@ -432,9 +460,10 @@ def main() -> None:
                 # Single GPU->CPU sync of the detections, inside "inference" -
                 # same placement as the RF-DETR iterations.
                 if args.nms == "fixed":
-                    dets, stats = postprocess_fixed(pred_buf, conf, iou, r, (pad_l, pad_t),
-                                                    (h0, w0), k=args.nms_candidates)
-                    flat = torch.cat([dets.flatten(), stats]).cpu().numpy()
+                    # In the graph, the NMS already ran in graph.replay();
+                    # with --no-graph it runs eagerly here.
+                    flat_gpu = graph_out if graph_out is not None else run_fixed_nms()
+                    flat = flat_gpu.cpu().numpy()
                     preds_cpu = flat[:-3].reshape(-1, 6)
                     max_candidates = max(max_candidates, int(flat[-3]))
                     truncated_frames += int(flat[-2])
