@@ -45,6 +45,7 @@ Common flags: `--config configs/default.yaml --source <file|rtsp://...> --no-dis
 | `scripts/analyze_nsys.py <report.sqlite> [skip]` | Per-frame breakdown of one report |
 | `scripts/plot_compare_reports.py --name ... --reports ... --labels ...` | Five comparison figures + summary CSV for any set of stages |
 | `scripts/plot_nsys_report.py <report.sqlite>` | Figures for a single report |
+| `scripts/plot_fps_bench.py [--set fps25w]` | Frame-time figure per model from `bench_fps.sh` results (no profiler): median of the runs, single runs as dots |
 | `scripts/plot_paper_figures.py` | The original YOLOv8n figure set (hard-coded September numbers) |
 
 Figures live in `reports/figures/<set>/`; see [`reports/figures/README.md`](../reports/figures/README.md).

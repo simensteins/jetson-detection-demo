@@ -1,0 +1,152 @@
+=== FPS set fps25w: 10 stages x 10 runs, started 2026-10-27T13:10:50+01:00
+--- stages: yolo_baseline yolo_graph yolo_gpupre yolo_nms yolo_fp16 m15_baseline m15_graph m15_gpupre m15_nms m15_fp16
+--- git: d1d98e4 7 uncommitted file(s)
+--- NV Power Mode: 25W 1 
+SOC family:tegra234  Machine:NVIDIA Jetson Orin Nano Engineering Reference Developer Kit Super
+Online CPUs: 0-5, Offline CPUs: 
+cpu0:  Governor=schedutil MinFreq=1344000 MaxFreq=1344000 CurrentFreq=1344000 IdleStates: WFI=0 c7=0 
+cpu1:  Governor=schedutil MinFreq=1344000 MaxFreq=1344000 CurrentFreq=1344000 IdleStates: WFI=0 c7=0 
+cpu2:  Governor=schedutil MinFreq=1344000 MaxFreq=1344000 CurrentFreq=1344000 IdleStates: WFI=0 c7=0 
+cpu3:  Governor=schedutil MinFreq=1344000 MaxFreq=1344000 CurrentFreq=1344000 IdleStates: WFI=0 c7=0 
+cpu4:  Governor=schedutil MinFreq=1344000 MaxFreq=1344000 CurrentFreq=1344000 IdleStates: WFI=0 c7=0 
+cpu5:  Governor=schedutil MinFreq=1344000 MaxFreq=1344000 CurrentFreq=1344000 IdleStates: WFI=0 c7=0 
+GPU MinFreq=918000000 MaxFreq=918000000 CurrentFreq=918000000
+Active GPU TPCs: 4
+EMC MinFreq=3199000000 MaxFreq=3199000000 CurrentFreq=3199000000
+FAN Dynamic Speed Control=nvfancontrol hwmon0_pwm1=59
+FAN Dynamic Speed Control=nvfancontrol hwmon0_pwm1_enable=1
+NV Power Mode: 25W
+--- desktop: inactive
+--- top CPU users:
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+  10350 studenta  20   0   14352   5172   3108 R   9.1   0.1   0:00.01 top
+      1 root      20   0   23276  13768   8684 S   0.0   0.2   0:08.84 systemd
+      2 root      20   0       0      0      0 S   0.0   0.0   0:00.00 kthreadd
+      3 root      20   0       0      0      0 S   0.0   0.0   0:00.00 pool_wo+
+      4 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker+
+      5 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker+
+      6 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker+
+--- over-current counters BEFORE: /sys/class/hwmon/hwmon3/oc1_event_cnt:0 /sys/class/hwmon/hwmon3/oc2_event_cnt:0 /sys/class/hwmon/hwmon3/oc3_event_cnt:0 
+=== round 1/10  13:10:50
+  yolo_baseline    54.6 FPS
+  yolo_graph       61.1 FPS
+  yolo_gpupre      74.9 FPS
+  yolo_nms         75.1 FPS
+  yolo_fp16       113.2 FPS
+  m15_baseline     19.5 FPS
+  m15_graph        19.9 FPS
+  m15_gpupre       20.5 FPS
+  m15_nms          20.6 FPS
+  m15_fp16         41.9 FPS
+  over-current counters: /sys/class/hwmon/hwmon3/oc1_event_cnt:0 /sys/class/hwmon/hwmon3/oc2_event_cnt:0 /sys/class/hwmon/hwmon3/oc3_event_cnt:0 
+=== round 2/10  13:17:40
+  yolo_baseline    55.7 FPS
+  yolo_graph       61.4 FPS
+  yolo_gpupre      74.5 FPS
+  yolo_nms         75.4 FPS
+  yolo_fp16       111.7 FPS
+  m15_baseline     19.5 FPS
+  m15_graph        19.9 FPS
+  m15_gpupre       20.4 FPS
+  m15_nms          20.6 FPS
+  m15_fp16         41.8 FPS
+  over-current counters: /sys/class/hwmon/hwmon3/oc1_event_cnt:0 /sys/class/hwmon/hwmon3/oc2_event_cnt:0 /sys/class/hwmon/hwmon3/oc3_event_cnt:0 
+=== round 3/10  13:24:25
+  yolo_baseline    56.0 FPS
+  yolo_graph       61.4 FPS
+  yolo_gpupre      74.5 FPS
+  yolo_nms         75.5 FPS
+  yolo_fp16       112.7 FPS
+  m15_baseline     19.5 FPS
+  m15_graph        19.8 FPS
+  m15_gpupre       20.4 FPS
+  m15_nms          20.6 FPS
+  m15_fp16         41.9 FPS
+  over-current counters: /sys/class/hwmon/hwmon3/oc1_event_cnt:0 /sys/class/hwmon/hwmon3/oc2_event_cnt:0 /sys/class/hwmon/hwmon3/oc3_event_cnt:0 
+=== round 4/10  13:31:10
+  yolo_baseline    55.7 FPS
+  yolo_graph       61.5 FPS
+  yolo_gpupre      74.6 FPS
+  yolo_nms         75.1 FPS
+  yolo_fp16       111.9 FPS
+  m15_baseline     19.4 FPS
+  m15_graph        19.9 FPS
+  m15_gpupre       20.4 FPS
+  m15_nms          20.6 FPS
+  m15_fp16         41.9 FPS
+  over-current counters: /sys/class/hwmon/hwmon3/oc1_event_cnt:0 /sys/class/hwmon/hwmon3/oc2_event_cnt:0 /sys/class/hwmon/hwmon3/oc3_event_cnt:0 
+=== round 5/10  13:37:55
+  yolo_baseline    55.6 FPS
+  yolo_graph       61.6 FPS
+  yolo_gpupre      73.4 FPS
+  yolo_nms         75.4 FPS
+  yolo_fp16       111.4 FPS
+  m15_baseline     19.5 FPS
+  m15_graph        19.8 FPS
+  m15_gpupre       20.4 FPS
+  m15_nms          20.6 FPS
+  m15_fp16         42.0 FPS
+  over-current counters: /sys/class/hwmon/hwmon3/oc1_event_cnt:0 /sys/class/hwmon/hwmon3/oc2_event_cnt:0 /sys/class/hwmon/hwmon3/oc3_event_cnt:0 
+=== round 6/10  13:44:41
+  yolo_baseline    55.7 FPS
+  yolo_graph       61.7 FPS
+  yolo_gpupre      74.1 FPS
+  yolo_nms         76.0 FPS
+  yolo_fp16       112.8 FPS
+  m15_baseline     19.4 FPS
+  m15_graph        19.8 FPS
+  m15_gpupre       20.4 FPS
+  m15_nms          20.6 FPS
+  m15_fp16         41.9 FPS
+  over-current counters: /sys/class/hwmon/hwmon3/oc1_event_cnt:0 /sys/class/hwmon/hwmon3/oc2_event_cnt:0 /sys/class/hwmon/hwmon3/oc3_event_cnt:0 
+=== round 7/10  13:51:26
+  yolo_baseline    56.0 FPS
+  yolo_graph       61.4 FPS
+  yolo_gpupre      74.0 FPS
+  yolo_nms         75.7 FPS
+  yolo_fp16       112.0 FPS
+  m15_baseline     19.4 FPS
+  m15_graph        19.9 FPS
+  m15_gpupre       20.4 FPS
+  m15_nms          20.6 FPS
+  m15_fp16         42.0 FPS
+  over-current counters: /sys/class/hwmon/hwmon3/oc1_event_cnt:0 /sys/class/hwmon/hwmon3/oc2_event_cnt:0 /sys/class/hwmon/hwmon3/oc3_event_cnt:0 
+=== round 8/10  13:58:11
+  yolo_baseline    56.0 FPS
+  yolo_graph       61.5 FPS
+  yolo_gpupre      74.6 FPS
+  yolo_nms         75.3 FPS
+  yolo_fp16       111.8 FPS
+  m15_baseline     19.5 FPS
+  m15_graph        19.8 FPS
+  m15_gpupre       20.4 FPS
+  m15_nms          20.5 FPS
+  m15_fp16         41.9 FPS
+  over-current counters: /sys/class/hwmon/hwmon3/oc1_event_cnt:0 /sys/class/hwmon/hwmon3/oc2_event_cnt:0 /sys/class/hwmon/hwmon3/oc3_event_cnt:0 
+=== round 9/10  14:04:56
+  yolo_baseline    55.9 FPS
+  yolo_graph       61.4 FPS
+  yolo_gpupre      74.8 FPS
+  yolo_nms         75.9 FPS
+  yolo_fp16       111.7 FPS
+  m15_baseline     19.4 FPS
+  m15_graph        19.8 FPS
+  m15_gpupre       20.4 FPS
+  m15_nms          20.6 FPS
+  m15_fp16         41.9 FPS
+  over-current counters: /sys/class/hwmon/hwmon3/oc1_event_cnt:0 /sys/class/hwmon/hwmon3/oc2_event_cnt:0 /sys/class/hwmon/hwmon3/oc3_event_cnt:0 
+=== round 10/10  14:11:41
+  yolo_baseline    55.7 FPS
+  yolo_graph       61.5 FPS
+  yolo_gpupre      73.6 FPS
+  yolo_nms         75.3 FPS
+  yolo_fp16       111.7 FPS
+  m15_baseline     19.5 FPS
+  m15_graph        19.8 FPS
+  m15_gpupre       20.4 FPS
+  m15_nms          20.6 FPS
+  m15_fp16         42.0 FPS
+  over-current counters: /sys/class/hwmon/hwmon3/oc1_event_cnt:0 /sys/class/hwmon/hwmon3/oc2_event_cnt:0 /sys/class/hwmon/hwmon3/oc3_event_cnt:0 
+
+--- over-current counters AFTER (should equal BEFORE): /sys/class/hwmon/hwmon3/oc1_event_cnt:0 /sys/class/hwmon/hwmon3/oc2_event_cnt:0 /sys/class/hwmon/hwmon3/oc3_event_cnt:0 
+=== finished 2026-10-27T14:18:26+01:00

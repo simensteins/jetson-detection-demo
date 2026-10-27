@@ -11,18 +11,30 @@ Both models, every optimization stage, one profiling session on 25.10.2026. Thes
 
 ## Summary
 
-| Stage | YOLOv8n FPS | M15 FPS |
-|---|---|---|
-| Baseline | 49.5 | 19.1 |
-| + CUDA Graph | 56.6 | 19.6 |
-| + GPU preprocessing | 69.5 | 20.2 |
-| + Custom NMS | 72.7 | 20.3 |
-| + FP16 | **86.7** | **40.9** |
-| **Total speed-up** | **1.75×** | **2.14×** |
+Two measurements of the same stages, both at 25 W with pinned clocks and the desktop stopped:
+- **No profiler** (the speed numbers to report): each script's own FPS, median of 10 interleaved runs, `scripts/bench_fps.sh`, 27.10.2026, set `fps25w`. Run-to-run spread (CV) 0.15–0.74 %, no throttling, no failed runs.
+- **Under nsys** (for the breakdowns and timelines): one profiled run per stage, FPS from the NVTX ranges.
 
-FPS = 1000 / mean frame time (decode start to next decode start).
+| Stage | YOLOv8n, no profiler | YOLOv8n, nsys | M15, no profiler | M15, nsys |
+|---|---|---|---|---|
+| Baseline | 55.7 | 49.5 | 19.5 | 19.1 |
+| + CUDA Graph | 61.5 | 56.6 | 19.8 | 19.6 |
+| + GPU preprocessing | 74.5 | 69.5 | 20.4 | 20.2 |
+| + Custom NMS | 75.4 | 72.7 | 20.6 | 20.3 |
+| + FP16 | **111.9** | **86.7** | **41.9** | **40.9** |
+| **Total speed-up** | **2.01×** | **1.75×** | **2.15×** | **2.14×** |
 
-## Key findings
+FPS = 1000 / mean frame time over 550 frames (first 50 skipped). The no-profiler numbers are the median of the 10 runs; every run, min–max and spread are in [`reports/fps/fps25w_summary.md`](../reports/fps/fps25w_summary.md).
+
+**The profiler costs a CPU-bound pipeline a lot.** nsys records every CUDA API call, which costs CPU time on each. M15's frame is GPU-bound (the model is ~83 % of it), so nsys takes only 1–2.5 %. YOLOv8n is CPU-bound: nsys costs it 4–11 % in the early stages and **22 % in the final FP16 stage** (111.9 → 86.7 FPS), the stage that makes the most API calls per millisecond. The profiled runs are right for *where* time goes; the speed of each stage is the no-profiler number.
+
+![YOLOv8n frame time per stage without a profiler (median of 10 runs; dots = single runs).](../reports/figures/fps25w/fps25w_yolo_01_frame_time.png)
+*YOLOv8n frame time per stage without a profiler (median of 10 runs; dots = single runs). 55.7 → 111.9 FPS.*
+
+![M15 frame time per stage without a profiler (median of 10 runs; dots = single runs).](../reports/figures/fps25w/fps25w_m15_01_frame_time.png)
+*M15 frame time per stage without a profiler (median of 10 runs; dots = single runs). 19.5 → 41.9 FPS.*
+
+## Key findings (from the profiled runs)
 - **Amdahl in action.** YOLOv8n's model is small, so removing overhead (graph, preprocessing, NMS) gives 1.47×. M15's model is 83 % of the frame, so the same steps give only 1.06×.
 - **FP16 is the big lever for both:** model GPU time 9.2 → 5.0 ms (YOLO) and 44.4 → 19.6 ms (M15).
 - **Custom NMS on YOLO evens out frame times:** median barely changes, but p95 drops 18.6 → 14.1 ms. Ultralytics' NMS costs more on frames with more detections.
@@ -100,6 +112,7 @@ The NMS run outside the graph and sized for 1000 candidates (1000×1000 IoU matr
 ## Reproduce
 - Jetson (desktop stopped, 25 W, `sudo jetson_clocks`): `bash scripts/profile_paper_set.sh`
 - Jetson, M15's last two stages only: `bash scripts/profile_m15_nms_fp16.sh`
+- FPS without the profiler: `bash scripts/bench_fps.sh` on the Jetson, then `python3 scripts/plot_fps_bench.py` on the Mac
 - Mac: `python3 scripts/plot_compare_reports.py --name paper25w_yolo --outdir reports/figures/paper25w --reports <5 yolo .sqlite> --labels ...`; M15: `--name paper25w_v2_m15 --outdir reports/figures/paper25w_v2` with `paper25w_m15_{baseline,graph,gpupre}` and `paper25w_v2_m15_{nms,fp16}`. The summary CSV includes the frame-time median, p95, p99, worst frame and std.
 - Figures, summary CSVs and logs are in git: `reports/figures/paper25w/`, `reports/figures/paper25w_v2/`, `reports/nsys_paper_reports/logfiles/`.
 
