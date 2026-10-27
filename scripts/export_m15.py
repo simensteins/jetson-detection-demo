@@ -9,7 +9,7 @@ one engine file.
 1. ONNX export via Ultralytics YOLO(...).export(format="onnx"): static
    batch-1 input at the training image size (960x960, 1 channel), no NMS in
    the graph. The output is (1, 4+nc, N): DFL-decoded xywh boxes in input
-   pixels and sigmoid class scores, over the N = 76,590 anchors of the four
+   pixels and sigmoid class scores, over the N = 76,500 anchors of the four
    strides (240^2 + 120^2 + 60^2 + 30^2 at 960x960).
 2. Engine build via trtexec (ships with JetPack at /usr/src/tensorrt/bin).
    This step MUST run on the Jetson itself - TensorRT engines are specific to
