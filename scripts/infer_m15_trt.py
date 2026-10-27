@@ -169,8 +169,39 @@ class TrtEngine:
             (self.inputs if is_input else self.outputs)[name] = buf
 
 
+def letterbox_geometry(h0: int, w0: int) -> tuple[float, int, int, tuple[int, int, int, int]]:
+    """Ultralytics letterbox semantics: scale to fit IMGSZ x IMGSZ, then
+    center-pad the remainder. Returns (gain, new_h, new_w, (pad_l, pad_r, pad_t, pad_b))."""
+    r = min(IMGSZ / w0, IMGSZ / h0)
+    new_w, new_h = round(w0 * r), round(h0 * r)
+    dw, dh = IMGSZ - new_w, IMGSZ - new_h
+    return r, new_h, new_w, (dw // 2, dw - dw // 2, dh // 2, dh - dh // 2)
+
+
+def gray_weights(dtype: torch.dtype, device: str | torch.device = "cuda") -> torch.Tensor:
+    """BT.601 weights with the /255 folded in, shaped to weight the C axis of (1, 3, h, w)."""
+    return (torch.tensor(GRAY_BGR_WEIGHTS, dtype=torch.float32, device=device)
+            / 255.0).to(dtype).view(1, 3, 1, 1)
+
+
+def preprocess_gpu(frame_gpu: torch.Tensor, new_hw: tuple[int, int],
+                   input_region: torch.Tensor, gray_w: torch.Tensor) -> None:
+    """(H0, W0, 3) uint8 BGR frame on the GPU -> the image region of the
+    letterboxed engine input (the border is filled once by the caller).
+    Resize first, then grayscale. Both are linear, so the order doesn't
+    change the result, but for a source larger than the letterbox
+    (1920x1080 -> 960x540) the weighted sum runs on 4x fewer pixels.
+    The weighted sum is a broadcast multiply + sum, not a matmul
+    (`@ gray_w` ran as a cuBLAS gemv: ~4 ms per frame at 1920x1080)."""
+    img = frame_gpu.permute(2, 0, 1)[None].to(gray_w.dtype)  # (1, 3, H0, W0), channels-last memory
+    img = F.interpolate(img, size=new_hw, mode="bilinear",
+                        align_corners=False, antialias=False)  # as cv2.resize
+    input_region.copy_((img * gray_w).sum(dim=1, keepdim=True))
+
+
 def preprocess_cpu(frame: np.ndarray, new_hw: tuple[int, int],
-                   pad_lrtb: tuple[int, int, int, int], dst: torch.Tensor) -> None:
+                   pad_lrtb: tuple[int, int, int, int], dst: torch.Tensor,
+                   fill_u8: int = LETTERBOX_FILL_U8) -> None:
     """The GPU path's pipeline on the CPU, the way Ultralytics' predict() does
     it: BT.601 grayscale (cv2.cvtColor), cv2.resize, letterbox pad with the 114
     fill, /255 - then one upload into the engine's input buffer (copy_() also
@@ -179,7 +210,7 @@ def preprocess_cpu(frame: np.ndarray, new_hw: tuple[int, int],
     img = cv2.resize(gray, (new_hw[1], new_hw[0]), interpolation=cv2.INTER_LINEAR)
     pad_l, pad_r, pad_t, pad_b = pad_lrtb
     img = cv2.copyMakeBorder(img, pad_t, pad_b, pad_l, pad_r,
-                             cv2.BORDER_CONSTANT, value=LETTERBOX_FILL_U8)
+                             cv2.BORDER_CONSTANT, value=fill_u8)
     img = img.astype(np.float32)[None, None] / 255.0  # -> (1, 1, 960, 960)
     dst.copy_(torch.from_numpy(img))
 
@@ -346,13 +377,8 @@ def main() -> None:
         raise SystemExit("Could not read a frame to warm up the engine.")
     h0, w0 = frame0.shape[:2]
 
-    # Letterbox geometry (Ultralytics semantics): scale to fit 960x960, then
-    # center-pad the remainder. Constant per source - computed once from frame0.
-    r = min(IMGSZ / w0, IMGSZ / h0)
-    new_w, new_h = round(w0 * r), round(h0 * r)
-    dw, dh = IMGSZ - new_w, IMGSZ - new_h
-    pad_l, pad_r = dw // 2, dw - dw // 2
-    pad_t, pad_b = dh // 2, dh - dh // 2
+    # Letterbox geometry: constant per source - computed once from frame0.
+    r, new_h, new_w, (pad_l, pad_r, pad_t, pad_b) = letterbox_geometry(h0, w0)
     print(f"  source frame: {w0}x{h0} -> grayscale + letterbox "
           f"(x{r:.4g}) to {new_w}x{new_h}, pad l/r t/b = {pad_l}/{pad_r} {pad_t}/{pad_b}")
 
@@ -361,10 +387,7 @@ def main() -> None:
     # The GPU path computes in the engine's input dtype (FP16 for an fp16
     # engine, so nothing is cast at the engine boundary). 0-255 pixel values
     # are exact in FP16, and the weighted sum stays <= 1.0.
-    pre_dtype = input_buf.dtype
-    # BT.601 weights with the /255 folded in, shaped to weight the C axis of (1, 3, h, w).
-    gray_w = (torch.tensor(GRAY_BGR_WEIGHTS, dtype=torch.float32, device="cuda")
-              / 255.0).to(pre_dtype).view(1, 3, 1, 1)
+    gray_w = gray_weights(input_buf.dtype)
     # The letterbox border is the same every frame: fill the whole input once,
     # then each frame writes only the image region (no per-frame pad + copy).
     input_buf.fill_(LETTERBOX_FILL)
@@ -376,15 +399,7 @@ def main() -> None:
         else:
             cpu_staging.copy_(torch.from_numpy(frame))
             gpu_raw.copy_(cpu_staging, non_blocking=True)
-            # Resize first, then grayscale. Both are linear, so the order doesn't
-            # change the result, but for a source larger than the letterbox
-            # (1920x1080 -> 960x540) the weighted sum runs on 4x fewer pixels.
-            # The weighted sum is a broadcast multiply + sum, not a matmul
-            # (`@ gray_w` ran as a cuBLAS gemv: ~4 ms per frame at 1920x1080).
-            img = gpu_raw.permute(2, 0, 1)[None].to(pre_dtype)  # (1, 3, H0, W0), channels-last memory
-            img = F.interpolate(img, size=(new_h, new_w), mode="bilinear",
-                                align_corners=False, antialias=False)  # as cv2.resize
-            input_region.copy_((img * gray_w).sum(dim=1, keepdim=True))
+            preprocess_gpu(gpu_raw, (new_h, new_w), input_region, gray_w)
 
     stage = (f"graph={'off' if args.no_graph else 'on'} preprocess={args.preprocess} "
              f"nms={args.nms}" + (f" k={args.nms_candidates}"
