@@ -33,6 +33,7 @@ Common flags: `--config configs/default.yaml --source <file|rtsp://...> --no-dis
 | Script | What |
 |---|---|
 | `scripts/profile_paper_set.sh [set-name] [stage ...]` | **All stages of both models in one controlled session.** Optional stage arguments run only those stages (`m15_nms`, or a prefix: `m15`, `yolo`). See [measurement-protocol.md](measurement-protocol.md). |
+| `scripts/bench_fps.sh [set-name] [runs] [stage ...]` | **FPS without a profiler:** every stage of both models, N runs each (default 10), interleaved, same checks as the paper set; median/mean/std/min/max per stage in `reports/fps/` |
 | `scripts/profile_m15_nms_fp16.sh [set-name]` | M15's last two stages in the new order (custom NMS on TF32, then + FP16), same checks and logs; default set `paper25w_v2` |
 | `scripts/profile.sh` | Old v1 wrapper (NVTX only, YOLO demo); kept for history |
 | `scripts/nvtx_smoketest.py` | Checks that NVTX ranges reach nsys |

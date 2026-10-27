@@ -31,6 +31,10 @@ To re-run only some stages under the same conditions, add stage names after the 
 
 It writes, per stage, `reports/<set>_<model>_<stage>.nsys-rep`, `.sqlite` and `.log`, plus `reports/<set>_session.log` (power mode, clocks, git commit, top CPU users, over-current counters before and after) and a `tegrastats` log.
 
+### FPS without the profiler
+
+nsys adds its own overhead, so the speed numbers for the paper come from a separate run without it: `bash scripts/bench_fps.sh [set-name] [runs] [stage ...]` (defaults: `fps25w`, 10 runs, all ten stages), under the same conditions as above. Each run is the script's own FPS over 600 frames with the first 50 excluded. The runs are interleaved (round 1 runs every stage once, then round 2, ...) so slow drift spreads over all stages, and the over-current counters are checked after every round. Results in `reports/fps/`: every run (`<set>_runs.csv`), per stage median, mean ± std, min–max, coefficient of variation and speed-up over the baseline (`<set>_summary.md` / `.csv`), and the session log. Report the median. About 75–90 minutes for all stages.
+
 Every profile uses `nsys profile --trace=cuda,nvtx --cuda-graph-trace=node`. Without `--cuda-graph-trace=node`, a CUDA graph shows up as one block instead of its individual kernels; that once made Iteration 1 look like it had removed 85 % of the kernels.
 
 ## Analysing
