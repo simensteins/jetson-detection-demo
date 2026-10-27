@@ -32,7 +32,7 @@ Common flags: `--config configs/default.yaml --source <file|rtsp://...> --no-dis
 
 | Script | What |
 |---|---|
-| `scripts/profile_paper_set.sh [set-name]` | **All stages of both models in one controlled session.** See [measurement-protocol.md](measurement-protocol.md). |
+| `scripts/profile_paper_set.sh [set-name] [all\|yolo\|m15]` | **All stages of both models (or one) in one controlled session.** See [measurement-protocol.md](measurement-protocol.md). |
 | `scripts/profile.sh` | Old v1 wrapper (NVTX only, YOLO demo); kept for history |
 | `scripts/nvtx_smoketest.py` | Checks that NVTX ranges reach nsys |
 

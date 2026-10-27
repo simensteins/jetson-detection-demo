@@ -6,16 +6,23 @@
 #     sudo systemctl isolate multi-user.target     # stop the desktop
 #     sudo nvpmodel -m <25W id> && sudo jetson_clocks
 #     source .venv/bin/activate
-#     bash scripts/profile_paper_set.sh [set-name]   # default set name: paper25w
+#     bash scripts/profile_paper_set.sh [set-name] [all|yolo|m15]
+#                                    # defaults: set paper25w, both models
 #     sudo systemctl isolate graphical.target      # desktop back afterwards
 #
 # Refuses to start unless the clocks are pinned (jetson_clocks); warns if the
 # desktop is running. Writes, per stage, reports/<set>_<model>_<stage>.nsys-rep,
 # .sqlite and .log (the script's own output), plus <set>_session.log with the
 # clock state, the over-current counters before/after, and a tegrastats log.
+#
+# Both models use the same stage order: baseline, + CUDA graph, + GPU
+# preprocessing, + custom NMS, + FP16 (each stage keeps the earlier ones).
+# The set paper25w (25.10.2026) ran M15 with FP16 before the custom NMS.
 set -euo pipefail
 
 SET="${1:-paper25w}"
+MODELS="${2:-all}"
+[[ "$MODELS" =~ ^(all|yolo|m15)$ ]] || { echo "models must be all, yolo or m15"; exit 1; }
 SRC="data/testdata.mkv"
 PAUSE=60   # seconds between runs, so each starts from the same thermal state
 NSYS="nsys profile --trace=cuda,nvtx --cuda-graph-trace=node --force-overwrite true"
@@ -48,7 +55,7 @@ if systemctl is-active --quiet graphical.target; then
 fi
 
 {
-    echo "=== set $SET, started $(date -Is)"
+    echo "=== set $SET ($MODELS), started $(date -Is)"
     echo "--- git: $(git rev-parse --short HEAD) $(git status --porcelain | wc -l) uncommitted file(s)"
     echo "--- $(sudo nvpmodel -q | tr '\n' ' ')"
     echo "$clocks"
@@ -72,18 +79,22 @@ run() {  # run <name> <command...>
 }
 
 # --- YOLOv8n: five stages --------------------------------------------------
+if [[ "$MODELS" != m15 ]]; then
 run yolo_baseline python3 -m src.detect $YOLO_ARGS
 run yolo_graph    python3 scripts/infer_cuda_graph.py $YOLO_ARGS
 run yolo_gpupre   python3 scripts/infer_cuda_graph_gpu_resize.py $YOLO_ARGS
 run yolo_nms      python3 scripts/infer_cuda_graph_custom_nms.py $YOLO_ARGS
 run yolo_fp16     python3 scripts/infer_cuda_graph_fp16.py $YOLO_ARGS --engine yolov8n_fp16_io.engine
+fi
 
 # --- M15: five stages ------------------------------------------------------
+if [[ "$MODELS" != yolo ]]; then
 run m15_baseline  python3 scripts/infer_m15_trt.py --engine "$M15_FP32" $M15_ARGS --no-graph --preprocess cpu
 run m15_graph     python3 scripts/infer_m15_trt.py --engine "$M15_FP32" $M15_ARGS --preprocess cpu
 run m15_gpupre    python3 scripts/infer_m15_trt.py --engine "$M15_FP32" $M15_ARGS
-run m15_fp16      python3 scripts/infer_m15_trt.py --engine "$M15_FP16" $M15_ARGS
-run m15_nms       python3 scripts/infer_m15_trt.py --engine "$M15_FP16" $M15_ARGS --nms fixed
+run m15_nms       python3 scripts/infer_m15_trt.py --engine "$M15_FP32" $M15_ARGS --nms fixed
+run m15_fp16      python3 scripts/infer_m15_trt.py --engine "$M15_FP16" $M15_ARGS --nms fixed
+fi
 
 {
     echo; echo "--- over-current counters AFTER (should equal BEFORE):"

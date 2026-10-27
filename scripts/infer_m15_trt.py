@@ -55,10 +55,10 @@ Usage (run from anywhere - the project root is added to sys.path below):
         --no-display --max-frames 600 --warmup-frames 50
     python3 scripts/infer_m15_trt.py --engine models/m15/m15_fast_fp32-tf32.engine \
         --max-frames 600 --warmup-frames 50   # with display, press q to quit
-    # FP16 engine - the same script, the dtypes are read from the engine:
-    python3 scripts/infer_m15_trt.py --engine models/m15/m15_fast_fp16.engine \
-        --no-display --max-frames 600 --warmup-frames 50
-    # + fixed-shape NMS (stage 5, here on the FP16 engine):
+    # + fixed-shape NMS (stage 4, on the TF32 engine - same order as YOLOv8n):
+    python3 scripts/infer_m15_trt.py --engine models/m15/m15_fast_fp32-tf32.engine \
+        --nms fixed --no-display --max-frames 600 --warmup-frames 50
+    # + FP16 (stage 5) - the same script, the dtypes are read from the engine:
     python3 scripts/infer_m15_trt.py --engine models/m15/m15_fast_fp16.engine \
         --nms fixed --no-display --max-frames 600 --warmup-frames 50
     # CPU preprocessing instead of GPU (same math, Ultralytics' placement):
