@@ -38,6 +38,13 @@ Common flags: `--config configs/default.yaml --source <file|rtsp://...> --no-dis
 | `scripts/profile.sh` | Old v1 wrapper (NVTX only, YOLO demo); kept for history |
 | `scripts/nvtx_smoketest.py` | Checks that NVTX ranges reach nsys |
 
+## Kernel-level analysis
+
+| Script | What |
+|---|---|
+| `scripts/top_kernels.py <report.sqlite> [skip] [top_n]` | Rank the GPU kernels inside `inference` (warm-up skipped) by time, with grids, registers and the matching ncu filters (runs anywhere) |
+| `scripts/ncu_top_kernels.py [--dry-run] [--top N \| --ranks 1,2,4] [--sqlite ...] [-- <stage command>]` | Jetson: Nsight Compute (`--set full`) on the top kernels of a stage, one frame of launches each; default = the final M15 FP16 stage. Output in `reports/ncu/`. See [m15.md](m15.md#kernel-level-analysis-nsight-compute) |
+
 ## Analysis and figures (on the Mac)
 
 | Script | What |
