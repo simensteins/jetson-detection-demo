@@ -1,0 +1,27 @@
+[10/27/2026-12:11:24] [TRT] [W] Using an engine plan file across different models of devices is not supported and is likely to affect performance or even cause errors or deadlock.
+/home/studenta/nsight-demo/jetson-detection-demo/.venv/lib/python3.12/site-packages/torch/cuda/__init__.py:422: UserWarning: Found GPU0 Orin which is of compute capability (CC) 8.7.
+The following list shows the CCs this version of PyTorch was built for and the hardware CCs it supports:
+- 8.0 which supports hardware CC >=8.0,<9.0 except {8.7}
+- 9.0 which supports hardware CC >=9.0,<10.0
+- 10.0 which supports hardware CC >=10.0,<11.0 except {10.1}
+- 11.0 which supports hardware CC >=11.0,<12.0
+- 12.0 which supports hardware CC >=12.0,<13.0
+No published PyTorch CUDA builds for release 2.13.0+cu130 support this GPU. Visit https://pytorch.org/get-started/locally/ to find a compatible release.
+  _warn_unsupported_code(d, device_cc, code_ccs)
+Loading models/m15/m15_fast_fp16.engine ...
+  'images' shape=(1, 1, 960, 960) dtype=torch.float16
+  'output0' shape=(1, 5, 76500) dtype=torch.float16
+  anchors per frame: 76500 (strides 4/8/16/32 at 960x960)
+  source frame: 1920x1080 -> grayscale + letterbox (x0.5) to 960x540, pad l/r t/b = 0/0 210/210
+  stage: graph=on preprocess=gpu nms=fixed k=100 (in the CUDA graph)
+Capturing CUDA graph...
+Graph captured (engine + fixed NMS).
+Starting inference loop.
+processed 550 frames in 13.5s (after 50-frame warm-up)  ->  40.9 FPS
+--nms fixed (k=100): most candidates above conf=0.25 in a frame: 3; 0 of 600 frames filled all k, 0 needed more than 10 NMS passes (0 and 0 = identical to torchvision.ops.nms on every frame)
+Collecting data...
+Generating '/tmp/nsys-report-d46d.qdstrm'
+Press Ctrl-C to stop symbol files downloading
+[1/1] [0%                          ] paper25w_v2_m15_fp16.nsys-rep[1/1] [0%                          ] paper25w_v2_m15_fp16.nsys-rep[1/1] [10%                         ] paper25w_v2_m15_fp16.nsys-rep[1/1] [9%                          ] paper25w_v2_m15_fp16.nsys-rep[1/1] [8%                          ] paper25w_v2_m15_fp16.nsys-rep[1/1] [12%                         ] paper25w_v2_m15_fp16.nsys-rep[1/1] [11%                         ] paper25w_v2_m15_fp16.nsys-rep[1/1] [13%                         ] paper25w_v2_m15_fp16.nsys-rep[1/1] [=16%                        ] paper25w_v2_m15_fp16.nsys-rep[1/1] [==20%                       ] paper25w_v2_m15_fp16.nsys-rep[1/1] [===23%                      ] paper25w_v2_m15_fp16.nsys-rep[1/1] [====26%                     ] paper25w_v2_m15_fp16.nsys-rep[1/1] [=====30%                    ] paper25w_v2_m15_fp16.nsys-rep[1/1] [======33%                   ] paper25w_v2_m15_fp16.nsys-rep[1/1] [=======36%                  ] paper25w_v2_m15_fp16.nsys-rep[1/1] [========40%                 ] paper25w_v2_m15_fp16.nsys-rep[1/1] [=========43%                ] paper25w_v2_m15_fp16.nsys-rep[1/1] [=========46%                ] paper25w_v2_m15_fp16.nsys-rep[1/1] [===========50%              ] paper25w_v2_m15_fp16.nsys-rep[1/1] [===========51%              ] paper25w_v2_m15_fp16.nsys-rep[1/1] [===========52%              ] paper25w_v2_m15_fp16.nsys-rep[1/1] [===========53%              ] paper25w_v2_m15_fp16.nsys-rep[1/1] [============54%             ] paper25w_v2_m15_fp16.nsys-rep[1/1] [============55%             ] paper25w_v2_m15_fp16.nsys-rep[1/1] [============56%             ] paper25w_v2_m15_fp16.nsys-rep[1/1] [============57%             ] paper25w_v2_m15_fp16.nsys-rep[1/1] [========================100%] paper25w_v2_m15_fp16.nsys-rep[1/1] [========================100%] paper25w_v2_m15_fp16.nsys-rep
+Generated:
+	/home/studenta/nsight-demo/jetson-detection-demo/reports/paper25w_v2_m15_fp16.nsys-rep

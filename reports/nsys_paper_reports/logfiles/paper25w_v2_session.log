@@ -1,0 +1,41 @@
+=== set paper25w_v2 (stages: m15_nms m15_fp16), started 2026-10-27T12:08:51+01:00
+--- git: 834c784 7 uncommitted file(s)
+--- NV Power Mode: 25W 1 
+SOC family:tegra234  Machine:NVIDIA Jetson Orin Nano Engineering Reference Developer Kit Super
+Online CPUs: 0-5, Offline CPUs: 
+cpu0:  Governor=schedutil MinFreq=1344000 MaxFreq=1344000 CurrentFreq=1344000 IdleStates: WFI=0 c7=0 
+cpu1:  Governor=schedutil MinFreq=1344000 MaxFreq=1344000 CurrentFreq=1344000 IdleStates: WFI=0 c7=0 
+cpu2:  Governor=schedutil MinFreq=1344000 MaxFreq=1344000 CurrentFreq=1344000 IdleStates: WFI=0 c7=0 
+cpu3:  Governor=schedutil MinFreq=1344000 MaxFreq=1344000 CurrentFreq=1344000 IdleStates: WFI=0 c7=0 
+cpu4:  Governor=schedutil MinFreq=1344000 MaxFreq=1344000 CurrentFreq=1344000 IdleStates: WFI=0 c7=0 
+cpu5:  Governor=schedutil MinFreq=1344000 MaxFreq=1344000 CurrentFreq=1344000 IdleStates: WFI=0 c7=0 
+GPU MinFreq=918000000 MaxFreq=918000000 CurrentFreq=918000000
+Active GPU TPCs: 4
+EMC MinFreq=3199000000 MaxFreq=3199000000 CurrentFreq=3199000000
+FAN Dynamic Speed Control=nvfancontrol hwmon0_pwm1=67
+FAN Dynamic Speed Control=nvfancontrol hwmon0_pwm1_enable=1
+NV Power Mode: 25W
+--- desktop: inactive
+--- top CPU users:
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+  19545 studenta  20   0   14352   5176   3108 R  10.0   0.1   0:00.01 top
+      1 root      20   0   23404  13760   8684 S   0.0   0.2   0:09.17 systemd
+      2 root      20   0       0      0      0 S   0.0   0.0   0:00.01 kthreadd
+      3 root      20   0       0      0      0 S   0.0   0.0   0:00.00 pool_wo+
+      4 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker+
+      5 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker+
+      6 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker+
+--- over-current counters BEFORE:
+/sys/class/hwmon/hwmon3/oc1_event_cnt:0
+/sys/class/hwmon/hwmon3/oc2_event_cnt:0
+/sys/class/hwmon/hwmon3/oc3_event_cnt:0
+=== 12:08:51 paper25w_v2_m15_nms: python3 scripts/infer_m15_trt.py --engine models/m15/m15_fast_fp32-tf32.engine --source data/testdata.mkv --no-display --max-frames 600 --warmup-frames 50 --nms fixed
+    report 7329 KiB
+=== 12:11:17 paper25w_v2_m15_fp16: python3 scripts/infer_m15_trt.py --engine models/m15/m15_fast_fp16.engine --source data/testdata.mkv --no-display --max-frames 600 --warmup-frames 50 --nms fixed
+    report 6346 KiB
+
+--- over-current counters AFTER (should equal BEFORE):
+/sys/class/hwmon/hwmon3/oc1_event_cnt:0
+/sys/class/hwmon/hwmon3/oc2_event_cnt:0
+/sys/class/hwmon/hwmon3/oc3_event_cnt:0
+=== finished 2026-10-27T12:13:07+01:00

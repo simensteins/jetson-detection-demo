@@ -1,0 +1,50 @@
+[10/27/2026-12:09:00] [TRT] [W] Using an engine plan file across different models of devices is not supported and is likely to affect performance or even cause errors or deadlock.
+/home/studenta/nsight-demo/jetson-detection-demo/.venv/lib/python3.12/site-packages/torch/cuda/__init__.py:422: UserWarning: Found GPU0 Orin which is of compute capability (CC) 8.7.
+The following list shows the CCs this version of PyTorch was built for and the hardware CCs it supports:
+- 8.0 which supports hardware CC >=8.0,<9.0 except {8.7}
+- 9.0 which supports hardware CC >=9.0,<10.0
+- 10.0 which supports hardware CC >=10.0,<11.0 except {10.1}
+- 11.0 which supports hardware CC >=11.0,<12.0
+- 12.0 which supports hardware CC >=12.0,<13.0
+No published PyTorch CUDA builds for release 2.13.0+cu130 support this GPU. Visit https://pytorch.org/get-started/locally/ to find a compatible release.
+  _warn_unsupported_code(d, device_cc, code_ccs)
+Loading models/m15/m15_fast_fp32-tf32.engine ...
+  'images' shape=(1, 1, 960, 960) dtype=torch.float32
+  'output0' shape=(1, 5, 76500) dtype=torch.float32
+  anchors per frame: 76500 (strides 4/8/16/32 at 960x960)
+  source frame: 1920x1080 -> grayscale + letterbox (x0.5) to 960x540, pad l/r t/b = 0/0 210/210
+  stage: graph=on preprocess=gpu nms=fixed k=100 (in the CUDA graph)
+Capturing CUDA graph...
+Graph captured (engine + fixed NMS).
+Starting inference loop.
+processed 550 frames in 27.1s (after 50-frame warm-up)  ->  20.3 FPS
+--nms fixed (k=100): most candidates above conf=0.25 in a frame: 3; 0 of 600 frames filled all k, 0 needed more than 10 NMS passes (0 and 0 = identical to torchvision.ops.nms on every frame)
+Collecting data...
+Generating '/tmp/nsys-report-0f70.qdstrm'
+Press Ctrl-C to stop symbol files downloading
+[1/221] Downloaded symbol information for /usr/bin/dash
+[27/221] Downloaded symbol information for /usr/lib/python3/dist-packages/gi/_gi_cairo.cpython-312-aarch64-linux-gnu.so
+[48/221] Downloaded symbol information for /usr/lib/aarch64-linux-gnu/libwebp.so.7.1.8
+[52/221] Downloaded symbol information for /usr/lib/python3/dist-packages/cairo/_cairo.cpython-312-aarch64-linux-gnu.so
+[107/221] Downloaded symbol information for /usr/lib/aarch64-linux-gnu/libbrotlicommon.so.1.1.0
+[112/221] Downloaded symbol information for /usr/lib/aarch64-linux-gnu/liborc-0.4.so.0.38.0
+[113/221] Downloaded symbol information for /usr/lib/aarch64-linux-gnu/libxcb.so.1.1.0
+[114/221] Downloaded symbol information for /usr/lib/aarch64-linux-gnu/libgraphite2.so.3.2.1
+[116/221] Downloaded symbol information for /usr/lib/aarch64-linux-gnu/libdrm.so.2.125.0
+[119/221] Downloaded symbol information for /usr/lib/aarch64-linux-gnu/libgirepository-1.0.so.1.0.0
+[134/221] Downloaded symbol information for /usr/lib/aarch64-linux-gnu/libpixman-1.so.0.42.2
+[135/221] Downloaded symbol information for /usr/lib/aarch64-linux-gnu/libXau.so.6.0.0
+[138/221] Downloaded symbol information for /usr/lib/python3/dist-packages/yaml/_yaml.cpython-312-aarch64-linux-gnu.so
+[144/221] Downloaded symbol information for /usr/lib/aarch64-linux-gnu/libtiff.so.6.0.1
+[148/221] Downloaded symbol information for /usr/lib/aarch64-linux-gnu/libopenjp2.so.2.5.0
+[149/221] Downloaded symbol information for /usr/lib/python3/dist-packages/gi/_gi.cpython-312-aarch64-linux-gnu.so
+[151/221] Downloaded symbol information for /usr/lib/aarch64-linux-gnu/libyaml-0.so.2.0.9
+[158/221] Downloaded symbol information for /usr/lib/aarch64-linux-gnu/libbrotlidec.so.1.1.0
+[160/221] Downloaded symbol information for /usr/lib/aarch64-linux-gnu/libxcb-render.so.0.0.0
+[178/221] Downloaded symbol information for /usr/lib/aarch64-linux-gnu/libharfbuzz.so.0.60830.0
+[186/221] Downloaded symbol information for /usr/lib/aarch64-linux-gnu/libX11.so.6.4.0
+[209/221] Downloaded symbol information for /usr/lib/aarch64-linux-gnu/libxcb-shm.so.0.0.0
+[220/221] Downloaded symbol information for /usr/lib/aarch64-linux-gnu/libcap.so.2.66
+[1/1] [0%                          ] paper25w_v2_m15_nms.nsys-rep[1/1] [0%                          ] paper25w_v2_m15_nms.nsys-rep[1/1] [11%                         ] paper25w_v2_m15_nms.nsys-rep[1/1] [10%                         ] paper25w_v2_m15_nms.nsys-rep[1/1] [9%                          ] paper25w_v2_m15_nms.nsys-rep[1/1] [8%                          ] paper25w_v2_m15_nms.nsys-rep[1/1] [11%                         ] paper25w_v2_m15_nms.nsys-rep[1/1] [10%                         ] paper25w_v2_m15_nms.nsys-rep[1/1] [12%                         ] paper25w_v2_m15_nms.nsys-rep[1/1] [=15%                        ] paper25w_v2_m15_nms.nsys-rep[1/1] [==18%                       ] paper25w_v2_m15_nms.nsys-rep[1/1] [==21%                       ] paper25w_v2_m15_nms.nsys-rep[1/1] [===24%                      ] paper25w_v2_m15_nms.nsys-rep[1/1] [====27%                     ] paper25w_v2_m15_nms.nsys-rep[1/1] [=====30%                    ] paper25w_v2_m15_nms.nsys-rep[1/1] [======33%                   ] paper25w_v2_m15_nms.nsys-rep[1/1] [=======36%                  ] paper25w_v2_m15_nms.nsys-rep[1/1] [=======39%                  ] paper25w_v2_m15_nms.nsys-rep[1/1] [========42%                 ] paper25w_v2_m15_nms.nsys-rep[1/1] [=========45%                ] paper25w_v2_m15_nms.nsys-rep[1/1] [==========48%               ] paper25w_v2_m15_nms.nsys-rep[1/1] [===========50%              ] paper25w_v2_m15_nms.nsys-rep[1/1] [===========51%              ] paper25w_v2_m15_nms.nsys-rep[1/1] [===========52%              ] paper25w_v2_m15_nms.nsys-rep[1/1] [===========53%              ] paper25w_v2_m15_nms.nsys-rep[1/1] [============54%             ] paper25w_v2_m15_nms.nsys-rep[1/1] [============55%             ] paper25w_v2_m15_nms.nsys-rep[1/1] [============56%             ] paper25w_v2_m15_nms.nsys-rep[1/1] [============57%             ] paper25w_v2_m15_nms.nsys-rep[1/1] [========================100%] paper25w_v2_m15_nms.nsys-rep[1/1] [========================100%] paper25w_v2_m15_nms.nsys-rep
+Generated:
+	/home/studenta/nsight-demo/jetson-detection-demo/reports/paper25w_v2_m15_nms.nsys-rep

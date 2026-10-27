@@ -36,6 +36,7 @@ import csv
 import sqlite3
 import statistics
 import sys
+import textwrap
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -94,6 +95,10 @@ def summarize_stage(paths: list[str], skip: int) -> dict:
         kernel_count=statistics.mean(f["kernel_count"] for f in frames),
         frames=len(frames),
     )
+    # Spread of the frame time: frames with detections can cost more than the mean shows.
+    q = statistics.quantiles(frame_times, n=100)
+    d.update(frame_p50_ms=statistics.median(frame_times), frame_p95_ms=q[94], frame_p99_ms=q[98],
+             frame_max_ms=max(frame_times), frame_std_ms=statistics.pstdev(frame_times))
     d["idle_gap_pct"] = 100.0 * d["idle_gap_ms"] / d["total_inf_ms"]
     d["blocked_ms"] = statistics.mean(blocked_us) / 1000.0
     d["active_dispatch_ms"] = d["dispatch_ms"] - d["blocked_ms"]
@@ -120,7 +125,7 @@ def plot_dispatch(stats, labels, title, outdir, fname):
         ax.text(i, s["dispatch_ms"] + top * 0.10, f"{s['kernel_count']:.0f} kernels",
                 ha="center", va="bottom", fontsize=8, color=MUTED)
     ax.set_xticks(list(x))
-    ax.set_xticklabels(labels)
+    ax.set_xticklabels([textwrap.fill(l, 14) for l in labels])  # long labels overlap otherwise
     style_axes(ax, "CPU time in CUDA API calls (ms)")
     ax.set_ylim(0, top * 1.30)
     ax.set_title(title)
@@ -141,7 +146,7 @@ def bar_chart(stats, labels, key, ylabel, title, sub, outdir, fname, colors):
         ax.text(b.get_x() + b.get_width() / 2, b.get_height() + top * 0.10,
                 sub(stats[i]), ha="center", va="bottom", fontsize=8, color=MUTED)
     ax.set_xticks(list(x))
-    ax.set_xticklabels(labels)
+    ax.set_xticklabels([textwrap.fill(l, 14) for l in labels])  # long labels overlap otherwise
     style_axes(ax, ylabel)
     ax.set_ylim(0, top * 1.30)
     ax.set_title(title)
@@ -173,7 +178,7 @@ def plot_time_breakdown(stats, labels, title, outdir, fname):
         ax.text(i, s["total_inf_ms"] + top * 0.02, f"{s['total_inf_ms']:.2f}ms total",
                 ha="center", va="bottom", fontsize=8.5, fontweight="bold")
     ax.set_xticks(list(x))
-    ax.set_xticklabels(labels)
+    ax.set_xticklabels([textwrap.fill(l, 14) for l in labels])  # long labels overlap otherwise
     style_axes(ax, "Time per `inference` range (ms)")
     ax.set_ylim(0, top * 1.15)
     ax.set_title(title)
@@ -280,7 +285,8 @@ def main() -> None:
     with open(csv_path, "w", newline="") as f:
         keys = ["frames", "frame_time_ms", "fps", "total_inf_ms", "pre_kernel_ms", "kernel_exec_ms",
                 "idle_gap_ms", "idle_gap_pct", "post_kernel_ms", "dispatch_ms", "active_dispatch_ms",
-                "blocked_ms", "kernel_count"]
+                "blocked_ms", "kernel_count", "frame_p50_ms", "frame_p95_ms", "frame_p99_ms",
+                "frame_max_ms", "frame_std_ms"]
         w = csv.writer(f)
         w.writerow(["stage", "reports"] + keys)
         for lbl, paths, s in zip(labels, stage_paths, stats):

@@ -1,6 +1,6 @@
-stage,reports,frames,frame_time_ms,fps,total_inf_ms,pre_kernel_ms,kernel_exec_ms,idle_gap_ms,idle_gap_pct,post_kernel_ms,dispatch_ms,active_dispatch_ms,blocked_ms,kernel_count
-Baseline,reports/nsys_paper_reports/paper25w_m15_baseline.sqlite,550,52.43,19.073,49.715,3.965,43.805,1.632,3.283,0.313,41.585,5.587,35.999,244.536
-+ CUDA Graph,reports/nsys_paper_reports/paper25w_m15_graph.sqlite,550,50.934,19.633,48.244,4.295,43.027,0.613,1.27,0.31,44.585,1.711,42.874,244.536
-+ GPU preprocessing,reports/nsys_paper_reports/paper25w_m15_gpupre.sqlite,550,49.593,20.164,46.966,1.614,44.379,0.676,1.44,0.297,44.555,1.414,43.141,248.664
-+ FP16,reports/nsys_paper_reports/paper25w_m15_fp16.sqlite,550,24.812,40.303,22.167,1.582,19.586,0.711,3.207,0.288,19.764,1.243,18.521,209.664
-+ Custom NMS (eager),reports/nsys_paper_reports/paper25w_m15_nms.sqlite,550,28.898,34.604,26.185,1.616,22.552,1.789,6.832,0.229,16.002,4.704,11.298,315
+stage,reports,frames,frame_time_ms,fps,total_inf_ms,pre_kernel_ms,kernel_exec_ms,idle_gap_ms,idle_gap_pct,post_kernel_ms,dispatch_ms,active_dispatch_ms,blocked_ms,kernel_count,frame_p50_ms,frame_p95_ms,frame_p99_ms,frame_max_ms,frame_std_ms
+Baseline,reports/nsys_paper_reports/paper25w_m15_baseline.sqlite,550,52.43,19.073,49.715,3.965,43.805,1.632,3.283,0.313,41.585,5.587,35.999,244.536,51.639,54.201,61.287,195.444,6.721
++ CUDA Graph,reports/nsys_paper_reports/paper25w_m15_graph.sqlite,550,50.934,19.633,48.244,4.295,43.027,0.613,1.27,0.31,44.585,1.711,42.874,244.536,50.178,52.024,59.963,191.737,6.611
++ GPU preprocessing,reports/nsys_paper_reports/paper25w_m15_gpupre.sqlite,550,49.593,20.164,46.966,1.614,44.379,0.676,1.44,0.297,44.555,1.414,43.141,248.664,48.849,51.198,58.382,190.254,6.491
++ FP16,reports/nsys_paper_reports/paper25w_m15_fp16.sqlite,550,24.812,40.303,22.167,1.582,19.586,0.711,3.207,0.288,19.764,1.243,18.521,209.664,24.044,26.43,33.645,186.417,7.303
++ Custom NMS (eager),reports/nsys_paper_reports/paper25w_m15_nms.sqlite,550,28.898,34.604,26.185,1.616,22.552,1.789,6.832,0.229,16.002,4.704,11.298,315,28.818,29.217,30.512,37.622,0.611
