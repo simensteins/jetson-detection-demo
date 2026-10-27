@@ -1,0 +1,20 @@
+Ranking from reports/paper25w_v2_m15_fp16.sqlite (kernels inside 'inference', first 50 frames skipped, n=550); shares are of GPU kernel time inside 'inference' (20.047 ms/frame)
+Stage command: /home/studenta/nsight-demo/jetson-detection-demo/.venv/bin/python3 scripts/infer_m15_trt.py --engine models/m15/m15_fast_fp16.engine --source data/testdata.mkv --nms fixed --no-display
+
+*  1  14.5% (cum  14.5%)   18.0/frame  sm80_xmma_fprop_implicit_gemm_f16f16_f16f16_f16_nhwckrsc_nhwc_tilesize128x128x32_stage4_warpsize2x2x1_g1_tensor16x8x16_simple_t1r1s1_linkable_execute_kernel_trt
+*  2  14.1% (cum  28.6%)   41.0/frame  permutationKernelPLC3
+*  3  11.4% (cum  40.0%)   10.0/frame  sm80_xmma_fprop_implicit_gemm_f16f16_f16f16_f16_nhwckrsc_nhwc_tilesize256x64x32_stage3_warpsize4x1x1_g1_tensor16x8x16_t1r3s3_linkable_execute_kernel_trt
+*  4   6.9% (cum  46.9%)   23.0/frame  generatedNativePointwise
+*  5   4.5% (cum  51.4%)    5.0/frame  sm80_xmma_depthwise_convolution_fprop_tiling_f16f16_f16f16_f16_nhwckrsc_nhwc_tilesize1x8x8_1x3x3_1x1x1_1x1x1_stage4_warpsize4x1x1_g64_betaFalse_execute_kernel_trt
+   6   3.5% (cum  55.0%)    6.0/frame  sm80_xmma_fprop_implicit_gemm_f16f16_f16f16_f16_nhwckrsc_nhwc_tilesize128x128x32_stage4_warpsize2x2x1_g1_tensor16x8x16_t1r3s3_linkable_execute_kernel_trt
+   7   3.3% (cum  58.3%)    8.0/frame  unrolled_elementwise_kernel
+   8   3.1% (cum  61.4%)    2.0/frame  sm80_xmma_fprop_implicit_gemm_f16f16_f16f16_f16_nhwckrsc_nhwc_tilesize256x128x64_stage3_warpsize4x2x1_g1_tensor16x8x16_linkable_execute_kernel_trt
+   9   2.3% (cum  63.6%)    3.0/frame  sm80_xmma_fprop_implicit_gemm_f16f16_f16f16_f16_nhwckrsc_nhwc_tilesize128x128x32_stage4_warpsize2x2x1_g1_tensor16x8x16_t1r1s1_linkable_execute_kernel_trt
+  10   2.2% (cum  65.8%)    8.0/frame  nhwcTonchw
+  11   2.2% (cum  68.0%)    2.0/frame  sm80_xmma_fprop_implicit_gemm_f16f16_f16f16_f16_nhwckrsc_nhwc_tilesize128x64x32_stage5_warpsize2x2x1_g1_tensor16x8x16_t1r3s3_linkable_execute_kernel_trt
+  12   1.6% (cum  69.6%)    1.0/frame  __myl_DivMulTran_0x45231a458b2afbc3ddfe876c5e514af6
+  13   1.5% (cum  71.1%)    1.0/frame  upsample_bilinear2d_out_frame
+  14   1.5% (cum  72.6%)    1.0/frame  sm50_xmma_softmax_trt_NCHW_FP16_Dim2_Threads256_execute2_kernel_trt
+  15   1.4% (cum  74.1%)    6.0/frame  sm80_xmma_fprop_implicit_gemm_f16f16_f16f16_f16_nhwckrsc_nhwc_tilesize128x128x32_stage4_warpsize2x2x1_g1_tensor16x8x16
+
+Selected (*): ranks [1, 2, 3, 4, 5], together 51.4% of GPU kernel time inside 'inference'

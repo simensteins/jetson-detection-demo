@@ -44,6 +44,7 @@ Common flags: `--config configs/default.yaml --source <file|rtsp://...> --no-dis
 |---|---|
 | `scripts/top_kernels.py <report.sqlite> [skip] [top_n]` | Rank the GPU kernels inside `inference` (warm-up skipped) by time, with grids, registers and the matching ncu filters (runs anywhere) |
 | `scripts/ncu_top_kernels.py [--dry-run] [--top N \| --ranks 1,2,4] [--sqlite ...] [-- <stage command>]` | Jetson: Nsight Compute (`--set full`) on the top kernels of a stage, one frame of launches each; default = the final M15 FP16 stage. Output in `reports/ncu/`. See [m15.md](m15.md#kernel-level-analysis-nsight-compute) |
+| `scripts/summarize_ncu.py [--tag m15_fp16]` | Reads the `.ncu-rep` files (Nsight Compute's Python module, from the macOS app or the Linux install) and writes one row per launch (occupancy, compute vs memory, limiter, top pipe and stall, L2 hit, memory reads) plus a per-kernel summary with Nsight Compute's warnings: `reports/ncu/ncu_<tag>_summary.md` / `_launches.csv` |
 
 ## Analysis and figures (on the Mac)
 
