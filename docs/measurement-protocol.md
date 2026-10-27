@@ -27,6 +27,8 @@ bash scripts/profile_paper_set.sh [set-name]  # ~25 min, default name: paper25w
 sudo systemctl isolate graphical.target
 ```
 
+To re-run only some stages under the same conditions, add stage names after the set name (`bash scripts/profile_paper_set.sh v2 m15_nms m15_fp16`, or `m15` / `yolo` for one model); `scripts/profile_m15_nms_fp16.sh` is that for M15's last two stages.
+
 It writes, per stage, `reports/<set>_<model>_<stage>.nsys-rep`, `.sqlite` and `.log`, plus `reports/<set>_session.log` (power mode, clocks, git commit, top CPU users, over-current counters before and after) and a `tegrastats` log.
 
 Every profile uses `nsys profile --trace=cuda,nvtx --cuda-graph-trace=node`. Without `--cuda-graph-trace=node`, a CUDA graph shows up as one block instead of its individual kernels; that once made Iteration 1 look like it had removed 85 % of the kernels.
