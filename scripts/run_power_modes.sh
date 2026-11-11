@@ -1,21 +1,16 @@
 #!/usr/bin/env bash
-# Every optimization stage of both models (YOLOv8n and M15) in every power
-# mode, one run each, unattended: the data behind all figures, per mode.
+# FPS of every optimization stage of both models (YOLOv8n and M15) in every
+# power mode: one run per stage per mode, no profiler, unattended.
 #
 # For each power mode the script sets it (nvpmodel), pins the clocks
-# (jetson_clocks), checks them, lets the board settle, and then runs each of
-# the ten stages twice:
-#   fps   without a profiler: the script's own FPS (600 frames, first 50
-#         excluded), the board's input power (VDD_IN) over the measured frames,
-#         max junction temperature and the GPU clock range from tegrastats
-#   nsys  under nsys (as profile_paper_set.sh), exported to .sqlite, for the
-#         breakdown / idle-gap / dispatch / swimlane figures
-# The over-current counters are read before and after every run; a run during
-# which they increased is marked throttled=1 (kept, not dropped: see
+# (jetson_clocks), checks them, lets the board settle for a minute, and runs
+# the ten stages one after the other: 600 frames of data/testdata.mkv, the
+# first 50 excluded, no display; the FPS is the scripts' own. The over-current
+# counters are read before and after every run; a run during which they
+# increased is marked throttled (kept, not dropped: see
 # docs/measurement-protocol.md).
 #
-# Run it on the Jetson with the desktop stopped (it checks), over SSH or the
-# text console, venv active:
+# On the Jetson, desktop stopped (it checks), over SSH or the text console:
 #     sudo systemctl isolate multi-user.target
 #     source .venv/bin/activate
 #     bash scripts/run_power_modes.sh [set-name] [mode-id ...]
@@ -25,37 +20,32 @@
 #
 # Environment options:
 #     STAGES="m15_fp16 yolo"  only these stages (full name, or prefix up to "_")
-#     KINDS="fps"             only fps or only nsys runs (default "fps nsys")
 #     FORCE=1                 rerun runs that are already done
-# Resumable: a run already in runs.csv is skipped, so after an interruption or
+# Resumable: a run already in fps.csv is skipped, so after an interruption or
 # a reboot the same command continues where it stopped. If a mode needs a
 # reboot to switch to, the script stops and says what to do.
 #
 # Writes reports/<set>/:
-#     runs.csv                 one row per run (mode, kind, stage, FPS, power, throttled, ...)
-#     session.log              per mode: clocks, over-current counters, every result
-#     <tag>/<stage>_fps.log    each run's own output; <tag> = mode name, e.g. 25w
-#     <tag>/<stage>_fps.tegrastats.txt
-#     <tag>/<stage>.nsys-rep, .sqlite, _nsys.log, _nsys.tegrastats.txt
-# About 25-35 minutes per mode. Plots (on the Mac): scripts/plot_power_modes.py.
+#     fps.csv          one row per run (mode, stage, FPS, over-current events, throttled)
+#     fps_table.md     FPS table: one row per stage, one column per mode
+#     session.log      per mode: clocks, over-current counters, every result
+#     <mode>/<stage>.log  each run's own output
+# About 10-15 minutes per mode.
 set -euo pipefail
 
 SET="${1:-modes}"
 MODE_ARGS=("${@:2}")   # empty = every mode
 read -r -a STAGE_SEL <<<"${STAGES:-}"
-read -r -a KIND_SEL <<<"${KINDS:-fps nsys}"
 FORCE="${FORCE:-0}"
 SRC="data/testdata.mkv"
-PAUSE=20     # seconds between runs
+PAUSE=15     # seconds between runs
 SETTLE=60    # seconds after switching mode before the first run
-TS_MS=500    # tegrastats interval
-NSYS="nsys profile --trace=cuda,nvtx --cuda-graph-trace=node --force-overwrite true"
 COMMON="--source $SRC --no-display --max-frames 600 --warmup-frames 50"
 YOLO_ARGS="--config configs/default.yaml $COMMON"
 M15_FP32="models/m15/m15_fast_fp32-tf32.engine"
 M15_FP16="models/m15/m15_fast_fp16.engine"
 OUT="reports/$SET"
-CSV="$OUT/runs.csv"
+CSV="$OUT/fps.csv"
 SESSION="$OUT/session.log"
 
 cd "$(dirname "$0")/.."
@@ -83,9 +73,6 @@ wanted() {  # wanted <stage>: is it selected by STAGES?
 SEL=()
 for i in "${!NAMES[@]}"; do wanted "${NAMES[$i]}" && SEL+=("$i"); done
 (( ${#SEL[@]} > 0 )) || { echo "no stage matches STAGES=${STAGES:-}"; exit 1; }
-for k in "${KIND_SEL[@]}"; do
-    [[ "$k" == fps || "$k" == nsys ]] || { echo "KINDS must be fps and/or nsys, got '$k'"; exit 1; }
-done
 
 # --- power modes from /etc/nvpmodel.conf ---------------------------------------
 declare -A MODE_NAME
@@ -114,85 +101,49 @@ fi
 sudo -v
 while sleep 50; do sudo -n true 2>/dev/null || exit; done &   # keep sudo alive
 KEEPALIVE=$!
-trap 'kill $KEEPALIVE 2>/dev/null; sudo tegrastats --stop >/dev/null 2>&1 || true' EXIT
+trap 'kill $KEEPALIVE 2>/dev/null || true' EXIT
 
 mkdir -p "$OUT"
-[[ -e "$CSV" ]] || echo "mode_id,mode,kind,stage,fps,frames,seconds,oc_delta,throttled,power_mw,tj_max_c,gpu_mhz_min,gpu_mhz_max,started" > "$CSV"
+[[ -e "$CSV" ]] || echo "mode_id,mode,stage,fps,frames,seconds,oc_delta,throttled,started" > "$CSV"
 oc_total() { cat /sys/class/hwmon/hwmon*/oc*_event_cnt 2>/dev/null | awk '{s += $1} END {print s + 0}'; }
 oc_list() { grep . /sys/class/hwmon/hwmon*/oc*_event_cnt 2>/dev/null | tr '\n' ' ' || true; }
-done_already() {  # done_already <mode-id> <kind> <stage>
+done_already() {  # done_already <mode-id> <stage>
     [[ "$FORCE" == 1 ]] && return 1
-    awk -F, -v m="$1" -v k="$2" -v s="$3" '$1 == m && $3 == k && $4 == s && $5 != "" {f = 1} END {exit !f}' "$CSV"
+    awk -F, -v m="$1" -v s="$2" '$1 == m && $3 == s && $4 != "" {f = 1} END {exit !f}' "$CSV"
 }
 start_mode=$(sudo nvpmodel -q | tail -1 | tr -d ' ')
 {
-    echo "=== power-mode set $SET, started $(date -Is)"
+    echo "=== power-mode FPS set $SET, started $(date -Is)"
     echo "--- modes: $(for m in "${MODES[@]}"; do printf '%s=%s ' "$m" "${MODE_NAME[$m]}"; done)"
-    echo "--- stages: $(for i in "${SEL[@]}"; do printf '%s ' "${NAMES[$i]}"; done); kinds: ${KIND_SEL[*]}"
+    echo "--- stages: $(for i in "${SEL[@]}"; do printf '%s ' "${NAMES[$i]}"; done)"
     echo "--- git: $(git rev-parse --short HEAD) $(git status --porcelain | wc -l) uncommitted file(s)"
     echo "--- desktop: $(systemctl is-active graphical.target || true); starting mode id $start_mode"
 } | tee -a "$SESSION"
 
-# tegrastats over the measured frames: average VDD_IN, max tj, GPU clock range.
-ts_stats() {  # ts_stats <tegrastats log> <measured seconds> -> "power_mw,tj_max,gpu_min,gpu_max"
-    python3 - "$1" "$2" "$TS_MS" <<'EOF'
-import re, sys
-lines = open(sys.argv[1], errors="replace").read().splitlines()
-n = max(1, round(float(sys.argv[2] or 0) * 1000 / int(sys.argv[3])))
-lines = lines[-(n + 1):-1] or lines   # the last sample can be after the run ended
-def vals(rx, cast=float):
-    return [cast(m.group(1)) for m in (re.search(rx, l) for l in lines) if m]
-p, tj, g = vals(r"VDD_IN (\d+)mW"), vals(r"tj@([\d.]+)C"), vals(r"GR3D_FREQ \d+%@\[?(\d+)", int)
-print(",".join([f"{sum(p) / len(p):.0f}" if p else "", f"{max(tj):.1f}" if tj else "",
-                str(min(g)) if g else "", str(max(g)) if g else ""]))
-EOF
-}
-
-measure() {  # measure <mode-id> <kind> <stage-index>
-    local id="$1" kind="$2" i="$3" tag; tag="$(tag_of "$1")"
-    local name="${NAMES[$i]}" base="$OUT/$tag/${NAMES[$i]}"
-    local log="${base}_$kind.log" ts="${base}_$kind.tegrastats.txt" started oc0 oc1
-    if done_already "$id" "$kind" "$name"; then
-        echo "  $kind $name: done already, skipped"; return 0
+measure() {  # measure <mode-id> <stage-index>
+    local id="$1" i="$2" name="${NAMES[$2]}" log started oc0 oc1
+    log="$OUT/$(tag_of "$1")/$name.log"
+    if done_already "$id" "$name"; then
+        echo "  $name: done already, skipped"; return 0
     fi
     started="$(date -Is)"; oc0="$(oc_total)"
-    sudo tegrastats --interval "$TS_MS" --logfile "$ts" &
-    sleep 1
     # Word splitting of the command string is intended (no quoted arguments in it).
-    if [[ "$kind" == nsys ]]; then
-        $NSYS -o "$base" ${CMDS[$i]} > "$log" 2>&1 || true
-    else
-        ${CMDS[$i]} > "$log" 2>&1 || true
-    fi
-    sudo tegrastats --stop >/dev/null 2>&1 || true
+    ${CMDS[$i]} > "$log" 2>&1 || true
     oc1="$(oc_total)"
-    local line fps="" frames="" secs="" stats=",,," throttled=0
+    local line fps="" frames="" secs="" throttled=0
     line="$(grep -E '^processed [0-9]+ frames in [0-9.]+s.*FPS' "$log" | tail -1 || true)"
     if [[ -n "$line" ]]; then
         frames="$(sed -E 's/^processed ([0-9]+) frames.*/\1/' <<<"$line")"
         secs="$(sed -E 's/^processed [0-9]+ frames in ([0-9.]+)s.*/\1/' <<<"$line")"
         fps="$(sed -E 's/.*->  *([0-9.]+) FPS.*/\1/' <<<"$line")"
-        stats="$(ts_stats "$ts" "$secs" 2>/dev/null || echo ",,,")"
-    fi
-    if [[ "$kind" == nsys ]]; then
-        if [[ -e "$base.nsys-rep" ]]; then
-            nsys export --type=sqlite --force-overwrite true -o "$base.sqlite" "$base.nsys-rep" >/dev/null 2>&1 \
-                || echo "  WARNING: sqlite export failed for $base.nsys-rep" | tee -a "$SESSION"
-        fi
-        if [[ ! -e "$base.sqlite" || $(stat -c %s "$base.nsys-rep" 2>/dev/null || echo 0) -lt $((1024 * 1024)) ]]; then
-            echo "  WARNING: nsys report missing or under 1 MiB - see $log" | tee -a "$SESSION"
-            fps=""   # not done: rerun next time
-        fi
     fi
     (( oc1 > oc0 )) && throttled=1
-    echo "$id,${MODE_NAME[$id]},$kind,$name,$fps,$frames,$secs,$((oc1 - oc0)),$throttled,$stats,$started" >> "$CSV"
+    echo "$id,${MODE_NAME[$id]},$name,$fps,$frames,$secs,$((oc1 - oc0)),$throttled,$started" >> "$CSV"
     if [[ -z "$fps" ]]; then
-        echo "  $kind $name: FAILED - see $log" | tee -a "$SESSION"
+        echo "  $name: FAILED - see $log" | tee -a "$SESSION"
     else
-        IFS=, read -r pw tj gmin gmax <<<"$stats"
-        printf "  %-4s %-14s %6s FPS  %5s mW  tj %4s C  GPU %s-%s MHz%s\n" "$kind" "$name" "$fps" \
-            "$pw" "$tj" "$gmin" "$gmax" "$( ((throttled)) && echo "  THROTTLED (+$((oc1 - oc0)) over-current events)")" \
-            | tee -a "$SESSION"
+        printf "  %-14s %6s FPS%s\n" "$name" "$fps" \
+            "$( ((throttled)) && echo "  THROTTLED (+$((oc1 - oc0)) over-current events)")" | tee -a "$SESSION"
     fi
     sleep "$PAUSE"
 }
@@ -227,30 +178,41 @@ set_mode() {  # set_mode <mode-id>: switch, pin the clocks, check; exits if a re
 
 for id in "${MODES[@]}"; do
     todo=0
-    for i in "${SEL[@]}"; do for k in "${KIND_SEL[@]}"; do
-        done_already "$id" "$k" "${NAMES[$i]}" || todo=1
-    done; done
+    for i in "${SEL[@]}"; do done_already "$id" "${NAMES[$i]}" || todo=1; done
     if (( todo == 0 )); then echo "mode $id ${MODE_NAME[$id]}: all runs done, skipped"; continue; fi
     set_mode "$id"
     mkdir -p "$OUT/$(tag_of "$id")"
     echo "settling ${SETTLE}s"; sleep "$SETTLE"
-    for i in "${SEL[@]}"; do
-        for k in "${KIND_SEL[@]}"; do measure "$id" "$k" "$i"; done
-    done
+    for i in "${SEL[@]}"; do measure "$id" "$i"; done
     echo "--- over-current counters after mode $id: $(oc_list)" | tee -a "$SESSION"
 done
+echo "=== finished $(date -Is)" | tee -a "$SESSION"
 
-{
-    echo; echo "=== finished $(date -Is)"
-    echo "--- throttled runs:"
-    awk -F, 'NR > 1 && $9 == 1 {printf "    %s %s %s (+%s events)\n", $2, $3, $4, $8}' "$CSV"
-} | tee -a "$SESSION"
+# --- table: one row per stage, one column per mode (last successful run) ------
+python3 - "$CSV" "$OUT/fps_table.md" <<'EOF'
+import csv, sys
+all_rows = list(csv.DictReader(open(sys.argv[1])))   # failed runs too: keeps the run order
+rows = [r for r in all_rows if r["fps"]]
+modes = list(dict.fromkeys(r["mode"] for r in all_rows))
+stages = list(dict.fromkeys(r["stage"] for r in all_rows))
+last = {(r["mode"], r["stage"]): r for r in rows}
+md = ["| Stage | " + " | ".join(modes) + " |", "|---|" + "---|" * len(modes)]
+for s in stages:
+    cells = []
+    for m in modes:
+        r = last.get((m, s))
+        cells.append("" if r is None else r["fps"] + (" ⚠" if r["throttled"] == "1" else ""))
+    md.append(f"| {s} | " + " | ".join(cells) + " |")
+md += ["", "FPS without a profiler, one run per stage and mode (600 frames, first 50 excluded). "
+       "⚠ = the over-current counters increased during the run (throttled)."]
+open(sys.argv[2], "w").write("\n".join(md) + "\n")
+print("\n" + "\n".join(md))
+EOF
+
 if [[ "$start_mode" != "$(sudo nvpmodel -q | tail -1 | tr -d ' ')" ]]; then
-    echo "Restoring the starting power mode $start_mode"
+    echo; echo "Restoring the starting power mode $start_mode"
     echo no | sudo nvpmodel -m "$start_mode" || true
     echo "jetson_clocks is reset by the mode change: run sudo jetson_clocks if you need pinned clocks"
 fi
 echo
-echo "Copy to the Mac (without the large .nsys-rep files):"
-echo "    rsync -av --exclude '*.nsys-rep' 'studenta@10.0.0.2:~/nsight-demo/jetson-detection-demo/$OUT' reports/"
-echo "Then: python3 scripts/plot_power_modes.py --set $SET"
+echo "Commit with: git add -f $OUT/fps.csv $OUT/fps_table.md $SESSION"
