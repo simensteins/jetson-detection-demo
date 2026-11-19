@@ -51,7 +51,8 @@ from pathlib import Path
 
 import numpy as np
 
-STAGE_LABELS = {"baseline": "Baseline", "gpupre": "+ GPU pre", "nms": "+ Fixed NMS", "fp16": "+ FP16"}
+STAGE_LABELS = {"reference": "Owner preprocessing", "baseline": "Baseline", "gpupre": "+ GPU pre",
+                "nms": "+ Fixed NMS", "fp16": "+ FP16"}
 
 
 def parse_args() -> argparse.Namespace:

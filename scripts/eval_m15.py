@@ -13,6 +13,14 @@ scripts/infer_m15_trt.py, so this measures the code that was profiled:
     nms       TF32 engine, GPU preprocessing, fixed-shape Cluster-NMS (k = 100)
     fp16      FP16 engine, GPU preprocessing (in FP16), fixed-shape NMS
 
+One more stage is not in the default set, because it is not part of the
+profiled pipeline:
+
+    reference TF32 engine, the model owner's preprocessing (PIL bilinear
+              resize, black letterbox, mean of the three channels),
+              torchvision NMS. Run it to check that the engine reproduces the
+              owner's own test numbers: --stages reference baseline ...
+
 Images can differ in size, so the letterbox is computed per image and the
 engine runs eagerly (no CUDA graph).
 
@@ -51,6 +59,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import infer_m15_trt as m15  # noqa: E402
 
 STAGES = ["baseline", "gpupre", "nms", "fp16"]
+EXTRA_STAGES = ["reference"]  # not run by default, see the module docstring
 CATEGORY_ID = 1  # the test annotations' single category
 
 
@@ -60,7 +69,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--images", required=True, help="Directory holding the images' file_name paths")
     p.add_argument("--engine-fp32", default="models/m15/m15_fast_fp32-tf32.engine")
     p.add_argument("--engine-fp16", default="models/m15/m15_fast_fp16.engine")
-    p.add_argument("--stages", nargs="+", default=STAGES, choices=STAGES)
+    p.add_argument("--stages", nargs="+", default=STAGES, choices=STAGES + EXTRA_STAGES)
     p.add_argument("--config", default="configs/m15-fast.yaml")
     p.add_argument("--conf", type=float, default=None, help="Confidence floor (default: config, 0.25)")
     p.add_argument("--iou", type=float, default=None, help="NMS IoU (default: config, 0.7)")
@@ -74,12 +83,30 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
+def preprocess_reference(img_bgr: np.ndarray, new_hw: tuple[int, int],
+                         pad_lrtb: tuple[int, int, int, int], dst: torch.Tensor) -> None:
+    """The model owner's preprocessing (their infer_fast_detector.py): PIL
+    bilinear resize of the RGB image (PIL smooths when it shrinks, cv2's
+    INTER_LINEAR does not), pasted on a black canvas, then the mean of the three
+    channels / 255. Ignores --pad-value: the owner's canvas is always black."""
+    from PIL import Image
+
+    new_h, new_w = new_hw
+    pad_l, pad_r, pad_t, pad_b = pad_lrtb
+    rgb = Image.fromarray(np.ascontiguousarray(img_bgr[:, :, ::-1]))
+    resized = np.asarray(rgb.resize((new_w, new_h), Image.BILINEAR), dtype=np.float32)
+    canvas = np.zeros((pad_t + new_h + pad_b, pad_l + new_w + pad_r), dtype=np.float32)
+    canvas[pad_t:pad_t + new_h, pad_l:pad_l + new_w] = resized.mean(axis=2) / 255.0
+    dst.copy_(torch.from_numpy(canvas)[None, None])
+
+
 class Stage:
     """One pipeline stage: an engine plus the preprocessing and NMS it uses."""
 
     def __init__(self, name: str, engine_path: str, args, conf: float, iou: float):
         self.name, self.conf, self.iou, self.args = name, conf, iou, args
         self.cpu_pre = name == "baseline"
+        self.reference_pre = name == "reference"
         self.fixed_nms = name in ("nms", "fp16")
         self.trt = m15.TrtEngine(engine_path)
         self.input = next(iter(self.trt.inputs.values()))
@@ -92,7 +119,9 @@ class Stage:
         """BGR uint8 image -> (M, 5) [x1, y1, x2, y2, score] in image pixels."""
         h0, w0 = img.shape[:2]
         r, new_h, new_w, (pad_l, pad_r, pad_t, pad_b) = m15.letterbox_geometry(h0, w0)
-        if self.cpu_pre:
+        if self.reference_pre:
+            preprocess_reference(img, (new_h, new_w), (pad_l, pad_r, pad_t, pad_b), self.input)
+        elif self.cpu_pre:
             m15.preprocess_cpu(img, (new_h, new_w), (pad_l, pad_r, pad_t, pad_b), self.input,
                                fill_u8=self.args.pad_value)
         else:
