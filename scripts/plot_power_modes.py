@@ -9,11 +9,20 @@ Per stage there is one bar per power mode (light to dark: 15 W, 25 W, MAXN
 SUPER); the bar is the median over the rounds. Bars of cells with at least one
 throttled run (over-current counters increased) are hatched.
 
+If reports/<set>/breakdown.csv exists (scripts/summarize_power_modes.py, run
+on the Jetson), it also draws where the time goes: per model, for each stage
+one stacked bar per power mode with the parts of the `inference` range (GPU
+kernel execution, idle gaps between kernels, CPU work before the first kernel,
+work after the last), the same segments as plot_compare_reports.py's
+time-breakdown figure; means per frame, median over the rounds, from the runs
+under nsys.
+
 Usage (from the repo root, after copying reports/<set>/ from the Jetson; any
 Python with matplotlib):
     python3 scripts/plot_power_modes.py --set modes_v2
     python3 scripts/plot_power_modes.py --set modes_v2 --target 30 --outdir reports/figures/modes_v2
-Writes <outdir>/<set>_<model>_fps.png/.pdf, one per model.
+Writes <outdir>/<set>_<model>_fps.png/.pdf and, with breakdown.csv,
+<set>_<model>_breakdown.png/.pdf, one per model.
 """
 from __future__ import annotations
 
@@ -29,7 +38,7 @@ from matplotlib.patches import Patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from plot_compare_reports import ramp  # noqa: E402
-from plot_paper_figures import MUTED, save, style_axes  # noqa: E402
+from plot_paper_figures import AQUA, BLUE, MUTED, ORANGE, YELLOW, save, style_axes  # noqa: E402
 
 MODELS = {"yolo": "YOLOv8n", "m15": "M15"}
 STAGES = ["baseline", "graph", "gpupre", "nms", "fp16"]
@@ -39,6 +48,58 @@ MODE_ORDER = ["15W", "25W", "MAXN_SUPER"]   # increasing power budget; others go
 MODE_LABELS = {"MAXN_SUPER": "MAXN SUPER", "15W": "15 W", "25W": "25 W"}
 TITLES = {"plain": "Without profiler", "nsys": "Under Nsight Systems"}
 HATCH = "////"
+MODE_SHORT = {"15W": "15 W", "25W": "25 W", "MAXN_SUPER": "MAXN"}
+SEGMENTS = [   # as plot_compare_reports.plot_time_breakdown
+    ("kernel_exec_ms", "Kernel execution (GPU busy)", BLUE, ""),
+    ("idle_gap_ms", "GPU idle gap (waiting on CPU)", ORANGE, "///"),
+    ("pre_kernel_ms", "Pre-kernel / setup (CPU)", AQUA, "..."),
+    ("post_kernel_ms", "Post-kernel (postprocessing)", YELLOW, "xxx"),
+]
+
+
+def plot_breakdown(path: Path, modes, model, set_name, outdir) -> None:
+    rows = [r for r in csv.DictReader(open(path)) if r["stage"].startswith(model + "_")]
+    if not rows:
+        return
+    cell = {}
+    for r in rows:
+        cell.setdefault((r["mode"], r["stage"].split("_", 1)[1]), []).append(r)
+    med = {k: {key: statistics.median(float(r[key]) for r in v) for key, *_ in SEGMENTS}
+           for k, v in cell.items()}
+    present = [m for m in modes if any((m, s) in med for s in STAGES)]
+    width = 0.8 / len(present)
+    fig, ax = plt.subplots(figsize=(7.0, 3.6))
+    top, ticks, tick_labels = 0.0, [], []
+    for i, stage in enumerate(STAGES):
+        for j, mode in enumerate(present):
+            vals = med.get((mode, stage))
+            if not vals:
+                continue
+            x = i + (j - (len(present) - 1) / 2) * width
+            bottom = 0.0
+            for key, label, color, hatch in SEGMENTS:
+                ax.bar(x, vals[key], width * 0.9, bottom=bottom, color=color, hatch=hatch,
+                       edgecolor="white", linewidth=0.5, zorder=3,
+                       label=label if (i, j) == (0, 0) else None)
+                bottom += vals[key]
+            top = max(top, bottom)
+            ticks.append(x)
+            tick_labels.append(MODE_SHORT.get(mode, mode))
+    style_axes(ax, "Time per inference (ms)")
+    ax.set_xticks(ticks)   # first row: the power mode under each bar
+    ax.set_xticklabels(tick_labels, fontsize=6.5)
+    ax.tick_params(axis="x", length=0, pad=3)
+    stages_axis = ax.secondary_xaxis(-0.09)   # second row: the stage under each group
+    stages_axis.set_xticks(range(len(STAGES)))
+    stages_axis.set_xticklabels([LABELS[s].replace("\n", " ") for s in STAGES], fontsize=8)
+    stages_axis.tick_params(axis="x", length=0, colors="black")
+    stages_axis.spines["bottom"].set_visible(False)
+    ax.set_ylim(0, top * 1.08)
+    ax.set_title(f"{MODELS[model]}: inference time per stage and power mode, by component",
+                 fontsize=10)
+    fig.legend(frameon=False, fontsize=7.5, ncol=2, loc="lower center")
+    fig.tight_layout(rect=(0, 0.11, 1, 1))
+    save(fig, outdir, f"{set_name}_{model}_breakdown")
 
 
 def load(path: Path) -> dict[tuple[str, str, str], list[dict]]:
@@ -112,6 +173,8 @@ def main() -> None:
     for model in MODELS:
         if any(s.startswith(model + "_") for _, s, _ in cells):
             plot(cells, modes, model, args.target, args.set, outdir)
+            if (src / "breakdown.csv").exists():
+                plot_breakdown(src / "breakdown.csv", modes, model, args.set, outdir)
 
 
 if __name__ == "__main__":
