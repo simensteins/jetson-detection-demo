@@ -1,0 +1,68 @@
+% Results from reports/modes_v2 (run 2026-11-23, git 5d6ee29): 3 rounds per stage, mode and
+% profiler setting, median reported. Replaces the earlier one-run table (tab:throughput-results).
+
+\begin{table}[H]
+  \centering
+  \small
+  \setlength{\tabcolsep}{3.5pt}
+  \begin{tabular}{@{}lrrrrrr@{}}
+    \toprule
+    & \multicolumn{3}{c}{YOLOv8n} & \multicolumn{3}{c}{M15} \\
+    \cmidrule(lr){2-4} \cmidrule(l){5-7}
+    Stage & 15\,W & 25\,W & MAXN & 15\,W & 25\,W & MAXN$^\dagger$ \\
+    \midrule
+    Baseline       & 43.8 &  56.0 &  62.2 & 13.7 & 19.5 & 20.9 \\
+    + CUDA graph   & 48.8 &  61.5 &  69.0 & 13.9 & 19.8 & 21.3 \\
+    + GPU preproc. & 54.3 &  74.6 &  80.7 & 14.2 & 20.5 & 21.9 \\
+    + Fixed NMS    & 54.7 &  75.8 &  81.6 & 14.1 & 20.6 & 22.0 \\
+    + FP16         & \textbf{80.8} & \textbf{111.9} & \textbf{123.6} & \textbf{29.5} & \textbf{42.0} & \textbf{45.1} \\
+    \midrule
+    Speed-up (\texttimes) & 1.84 & 2.00 & 1.99 & 2.15 & 2.15 & 2.16 \\
+    \bottomrule
+  \end{tabular}
+  \vspace{0.5em}
+  \caption{Throughput (FPS) after each optimization stage in each power mode
+  (MAXN = MAXN SUPER), 1920\texttimes 1080 input, no profiler; median of three
+  runs, which agree to within 1.6\,\%. Stages are cumulative. Speed-up is FP16
+  relative to the baseline of the same model and mode. $^\dagger$All M15 runs
+  in MAXN SUPER were throttled (over-current counters increased).}
+  \label{tab:throughput-results}
+\end{table}
+\vspace{-0.6em}
+
+\begin{table}[H]
+  \centering
+  \small
+  \setlength{\tabcolsep}{4pt}
+  \begin{tabular}{@{}lrrrrrr@{}}
+    \toprule
+    & \multicolumn{3}{c}{YOLOv8n} & \multicolumn{3}{c}{M15} \\
+    \cmidrule(lr){2-4} \cmidrule(l){5-7}
+    Stage & 15\,W & 25\,W & MAXN & 15\,W & 25\,W & MAXN \\
+    \midrule
+    Baseline       &  8.7 & 10.0 &  9.5 & 2.2 & 2.6 & 2.4 \\
+    + CUDA graph   &  6.8 &  7.6 &  7.4 & 0.7 & 1.0 & 0.9 \\
+    + GPU preproc. &  4.8 &  6.4 &  5.7 & 2.1 & 2.0 & 1.8 \\
+    + Fixed NMS    &  3.7 &  3.6 &  3.2 & 1.4 & 1.5 & 1.8 \\
+    + FP16         &  4.1 & \textbf{23.1} & \textbf{18.8} & 2.0 & 2.1 & 2.0 \\
+    \bottomrule
+  \end{tabular}
+  \vspace{0.5em}
+  \caption{Throughput lost under Nsight Systems (\%), relative to the same
+  stage and mode without a profiler (medians of three runs each).}
+  \label{tab:profiler-overhead}
+\end{table}
+\vspace{-0.6em}
+
+% Text for the Profiling Overhead subsection:
+Nsight Systems costs M15 at most 2.6\,\% of its throughput in any stage or
+power mode (Table~\ref{tab:profiler-overhead}), because its frame time is
+dominated by GPU kernels. YOLOv8n loses 4--10\,\% in the early stages and 23\,\%
+in the FP16 stage at 25~W, the stage that issues the most CUDA API calls per
+millisecond. At 15~W the same stage loses only 4\,\%: with the GPU clock
+limited to 612~MHz, the pipeline waits for the GPU, and the profiler's
+per-call CPU cost is hidden behind it. The overhead of tracing therefore
+depends on whether the pipeline is CPU- or GPU-bound, not on the model alone.
+Under the profiler, six of the fifteen M15 runs at 25~W registered one to four
+over-current events, without a measurable effect on throughput; no run
+without the profiler did.

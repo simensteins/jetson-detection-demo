@@ -1,0 +1,167 @@
+% Section 4 draft: Optimization Strategy. Paste over the current \section{Optimization Strategy} block.
+% References: docs/paper/section4_references.bib. EDIT: marks facts to check before submission.
+
+\section{Optimization Strategy}
+\vspace{0.35em}
+
+The optimizations were developed on a small, widely used detector and then
+applied to the stakeholder's SAR detector. This order was first a practical
+one: the stakeholder's model and data became available only well into the
+project, so the replica, the measurement procedure and the optimizations were
+built on a public model in the meantime. It also separates two questions:
+whether a change removes the bottleneck it targets, and whether the gain
+carries over to a heavier model with a different balance between GPU work and
+pipeline overhead.
+
+\subsection{Detection Models}
+
+\textbf{YOLOv8n} is the smallest model of the Ultralytics YOLOv8
+family~\cite{ultralytics-yolov8}. We use the COCO-pretrained weights
+unchanged: 80 classes, a three-channel 640$\times$640 input, and detection
+heads at strides 8, 16 and 32, which give 8400 candidate boxes per frame. It
+served as the development model while the stakeholder's model was not yet
+available: it is light, well documented and runs through the standard
+Ultralytics inference code.
+
+\textbf{M15} is the stakeholder's detector for airborne SAR imagery. It is
+based on YOLO11s~\cite{ultralytics-yolo11}, adapted to one class (person) and
+a single-channel grayscale input of 960$\times$960, and extended with an
+additional detection head at stride 4 (P2) for small targets. With four
+heads, it produces 76\,500 candidate boxes per frame. We received a training
+checkpoint, rebuilt the architecture as an Ultralytics model, loaded the
+weights with a strict check that every tensor matches, and exported it
+through ONNX to TensorRT. Table~\ref{tab:models} compares the two models.
+
+\begin{table}[H]
+  \centering
+  \small
+  \begin{tabular}{@{}lll@{}}
+    \toprule
+    & YOLOv8n & M15 \\
+    \midrule
+    Base architecture & YOLOv8n & YOLO11s + P2 head \\
+    Input & 640$\times$640, 3 channels & 960$\times$960, 1 channel \\
+    Classes & 80 (COCO) & 1 (person) \\
+    Detection strides & 8, 16, 32 & 4, 8, 16, 32 \\
+    Candidates per frame & 8\,400 & 76\,500 \\
+    Weights & COCO-pretrained & Stakeholder's checkpoint \\
+    \bottomrule
+  \end{tabular}
+  \vspace{0.5em}
+  \caption{The two detection models.}
+  \label{tab:models}
+\end{table}
+\vspace{-0.6em}
+
+\subsection{Baseline Inference Pipeline}
+
+Both baselines run a TensorRT engine built on the Jetson from the ONNX
+export, in FP32 with TensorRT allowed to use TF32 for matrix operations. Both
+read the 1920$\times$1080 video with OpenCV on the CPU and use a confidence
+threshold of 0.25 and an NMS IoU threshold of 0.7, the Ultralytics default.
+
+The YOLOv8n baseline is the unmodified Ultralytics inference path with the
+TensorRT engine: preprocessing (letterboxing, color conversion and
+normalization) on the CPU, one engine execution per frame in which every
+kernel is launched individually, and Ultralytics' NMS on the GPU. The M15
+baseline follows the same structure in our own script, because the
+checkpoint is not an Ultralytics model file: OpenCV converts the frame to
+grayscale, resizes it and pads it to 960$\times$960 on the CPU; the tensor is
+copied into the engine's input buffer; the engine runs; and
+\texttt{torchvision} performs class-agnostic NMS. Every later stage of M15
+reuses these functions, so a change in throughput can be attributed to the
+one step that changed.
+
+\subsection{Profiling-Guided Optimization Stages}
+
+Each stage followed the same loop: profile the current pipeline with Nsight
+Systems, find the largest avoidable cost on the timeline (idle gaps between
+kernels, CPU work in front of the GPU, or the kernels themselves), change
+that one step, and measure again. The stages are cumulative: each keeps the
+changes before it (Table~\ref{tab:optimization-stages}).
+
+\textbf{CUDA graph.} In the baseline, the CPU launches every kernel of the
+network separately on each frame. When the kernels are short, the GPU
+finishes one before the CPU has issued the next, which leaves idle gaps on
+the timeline. A CUDA graph records the sequence of kernel launches once and
+replays it with a single call. We capture the TensorRT engine's execution
+into a graph after one warm-up run and replay it on every frame. A captured
+graph reads from and writes to the same memory addresses on every replay and
+assumes the same tensor shapes, and operations that make the CPU wait for the
+GPU are not allowed during capture~\cite{pytorch-cuda-graphs}. These rules
+decide the design of the next two stages: GPU preprocessing writes into the
+engine's fixed input buffer, and NMS has to be rewritten with fixed shapes
+before it can be captured.
+
+\textbf{GPU preprocessing.} After the graph, preprocessing on the CPU became
+the largest cost in front of the network. In this stage the decoded 8-bit
+frame is uploaded once, and resizing, color conversion, normalization and
+letterbox padding run on the GPU, writing straight into the engine's input
+buffer. The order of operations matters: converting or normalizing the full
+1920$\times$1080 frame before resizing processes several times more pixels
+than necessary. Resizing first and converting the smaller result reduced the
+GPU time of M15's preprocessing from 5.4--7~ms to 1.3~ms per frame.
+% EDIT: the 5.4-7 ms -> 1.3 ms figure is from the profiled runs (docs/m15.md); keep or move to Section 6.
+
+\textbf{Fixed-shape NMS.} Standard NMS first keeps the boxes above the
+confidence threshold, so the size of every following tensor depends on the
+image. Each such step makes the CPU wait for the GPU to learn the size before
+it can continue, and the variable shapes prevent capturing NMS into a graph.
+The postprocessing time also grows with the number of detections, so frames
+with targets take longer. We replace it with a fixed-shape version: the
+$k$ highest-scoring candidates are selected (\texttt{topk}, $k = 100$),
+suppression is computed as a $k \times k$ IoU matrix, and the output is
+always a $k \times 6$ tensor in which unused rows have a score of zero.
+Nothing in it depends on the data, so the CPU can queue all of its operations
+without waiting, and the only synchronization is the single copy of the
+result to the CPU at the end. This removes the waits even when NMS runs
+outside the graph; capturing it as well also removes the cost of launching
+its operations one by one. The fixed version costs the same on every frame.
+Its gain therefore grows with the number of candidates above the threshold,
+up to $k$, while on frames without detections, where standard NMS stops
+early, it can cost slightly more. Its main effect is on the slowest frames
+rather than on the mean, and the size of the gain depends on how many
+targets the video contains.
+
+Both models get this fixed-shape NMS. For M15 we go one step further and
+capture it into the same CUDA graph as the engine, so a frame's network and
+postprocessing replay with one call and issue the same work regardless of the
+image's content; for YOLOv8n it runs after the graph replay. The suppression
+step also differs. YOLOv8n uses Fast NMS~\cite{bolya2019yolact}, a one-step
+approximation that can remove slightly more boxes than standard NMS, with an
+IoU threshold of 0.45 instead of the baseline's 0.7. M15 uses
+Cluster-NMS~\cite{zheng2020clusternms}, which gives exactly the result of
+standard NMS; in our test runs no frame had more than $k$ candidates above
+the threshold, so M15's fixed NMS matched standard NMS on every frame.
+
+\textbf{FP16.} The last stage builds the engine with 16-bit floating-point
+layers. Ultralytics' FP16 export keeps FP32 input and output tensors, so
+TensorRT adds conversion kernels at both ends of the network on every frame.
+We therefore build the engines with FP16 input and output as well: the
+preprocessing writes FP16 directly into the input buffer, and the network
+output stays in FP16 through candidate selection. One conversion to FP32 is
+kept on purpose, after the top-$k$ selection: box areas in the
+960$\times$960 input reach 921\,600, beyond FP16's largest value of 65\,504,
+and NMS computes areas and overlaps in the tensor's precision. Because FP16
+changes the numbers the network computes, its effect on the detections is
+measured on the SAR test set (Section~6).
+
+\begin{table}[H]
+  \centering
+  \small
+  \begin{tabular}{@{}p{0.31\columnwidth}p{0.63\columnwidth}@{}}
+    \toprule
+    Stage & Targeted bottleneck \\
+    \midrule
+    TensorRT baseline & Reference configuration for the staged comparison \\
+    + CUDA graph & CPU launch overhead and inter-kernel gaps \\
+    + GPU preprocessing & CPU preprocessing and associated data movement \\
+    + Fixed-shape NMS & Variable postprocessing work and GPU--CPU synchronization \\
+    + FP16 & GPU kernel execution time and data movement \\
+    \bottomrule
+  \end{tabular}
+  \vspace{0.5em}
+  \caption{Cumulative optimization stages and their targeted bottlenecks.}
+  \label{tab:optimization-stages}
+\end{table}
+\vspace{-0.6em}

@@ -1,0 +1,181 @@
+% Section 3 draft: Replica (testbed). Paste over the current \section{Replica} block.
+% EDIT: marks facts to fill in or check before submission.
+
+\section{Replica}
+\vspace{0.35em}
+
+The replica is a laboratory version of the onboard detection pipeline. It runs
+the same processing chain as the intended system, from video input to annotated
+detections, on the edge hardware that is considered for the aircraft. Recorded
+video replaces the live camera, and a host computer replaces the operator
+console. Both the input and the model can be exchanged without changing the
+pipeline, so the replica serves as a test bench for the detection models and
+for every optimization in Section~4.
+
+\subsection{Laboratory Platform}
+
+The edge platform is an NVIDIA Jetson Orin Nano Super Developer Kit. It
+combines a six-core Arm Cortex-A78AE CPU and an Ampere-architecture GPU with
+1024 CUDA cores and 32 Tensor Cores, on one module with 8~GB of 128-bit LPDDR5
+memory (102~GB/s)~\cite{nvidia-orin-nano-super}. The GPU is integrated: CPU
+and GPU use the same physical memory, so data passed between them does not
+cross a PCIe bus, but the two compete for the same memory bandwidth.
+% EDIT: cite NVIDIA's CUDA for Tegra application note for the shared memory (not on the product page).
+Power modes (\texttt{nvpmodel}) set the number of active CPU cores and the
+maximum CPU, GPU and memory (EMC) frequencies. The Super configuration offers
+three: 15~W, 25~W (the default) and MAXN SUPER~\cite{nvidia-jetson-power}
+(Table~\ref{tab:power-modes}). NVIDIA describes the MAXN modes as
+unconstrained but experimental: hardware throttling engages when the module's
+power exceeds its budget.
+
+\begin{table}[H]
+  \centering
+  \small
+  \begin{tabular}{@{}lrrrr@{}}
+    \toprule
+    Mode & CPU cores & CPU max & GPU max & EMC max \\
+    \midrule
+    15\,W       & 6 & 1498 & 612  & 3199 \\
+    25\,W       & 6 & 1344 & 918  & 3199 \\
+    MAXN SUPER & 6 & 1728 & 1020 & 3199 \\
+    \bottomrule
+  \end{tabular}
+  \vspace{0.5em}
+  \caption{Power modes of the Jetson Orin Nano 8\,GB Super; maximum
+  frequencies in MHz.}
+  \label{tab:power-modes}
+\end{table}
+\vspace{-0.6em}
+The software stack is Ubuntu 24.04 with the Linux for Tegra kernel, CUDA,
+TensorRT for model execution, and PyTorch for the pipeline code around it.
+% EDIT: JetPack, CUDA, TensorRT and PyTorch versions (dpkg -l | grep -E "nvidia-l4t-core|tensorrt";
+% python3 -c "import tensorrt, torch; print(tensorrt.__version__, torch.__version__)").
+
+Figure~\ref{fig:lab-setup} shows the bench. The Jetson is connected to a
+monitor for the annotated output and to the host computer over Ethernet. % EDIT: match the photo.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[
+        width=\columnwidth,
+        totalheight=0.28\textheight,
+        keepaspectratio
+    ]{figures/lab_setup.jpg} % EDIT: photo file name
+    \caption{Laboratory replica: Jetson Orin Nano Super, monitor and host
+    computer.}
+    \label{fig:lab-setup}
+\end{figure}
+
+\subsection{System Architecture and Data Flow}
+
+Figure~\ref{fig:architecture-diagram} shows the data flow. On the Jetson, each
+frame passes through five steps: decoding of the 1920$\times$1080 video,
+preprocessing (color conversion as the model requires, resizing and
+letterboxing to the network input), TensorRT inference, postprocessing (confidence filtering,
+non-maximum suppression and mapping of the boxes back to the frame), and
+annotation for the display. The input is a recorded video file for the
+experiments; the same pipeline also reads an RTSP stream, which is how a
+camera feed would arrive. The annotated frames can go to the monitor or be
+streamed on to another machine. For the throughput experiments the display is
+disabled (Section~5).
+
+Profiling reports are written on the Jetson, and
+copied to the host computer, where the analysis scripts and the Nsight
+graphical interfaces run. The host takes no part in the measured pipeline.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[
+        width=\columnwidth,
+        totalheight=0.32\textheight,
+        keepaspectratio
+    ]{figures/diagram.png}
+    \caption{System architecture of the replica. Video is decoded,
+    preprocessed, run through the TensorRT engine, postprocessed and annotated
+    on the Jetson; profiling reports go to the host computer for analysis.}
+    \label{fig:architecture-diagram}
+\end{figure}
+
+\subsection{Profiling Infrastructure}
+
+Two NVIDIA tools give complementary views of the pipeline.
+
+\textbf{Nsight Systems} (\texttt{nsys}) records a timeline of the whole
+process: CPU threads, CUDA API calls, memory copies and GPU kernels. It is a
+tracing tool: rather than sampling counters, it records an event with start
+and end timestamps for every traced call and GPU operation. For CUDA it builds
+on CUPTI, NVIDIA's profiling and tracing interface~\cite{nvidia-nsys-guide},
+whose activity interface asynchronously records CUDA API calls, kernels and
+memory copies~\cite{nvidia-cupti}. Two trace methods exist: a hardware-based
+trace, enabled by default on supported GPUs beginning with Blackwell, and the
+older software-instrumented trace; on the Orin's
+Ampere GPU the software-instrumented method applies.
+% EDIT: confirm in a report's Diagnostics Summary, which states the CUDA trace method used.
+NVTX is a header-only annotation library: the application marks named ranges,
+and Nsight Systems collects them and places them on the same timeline. The events are buffered during the run and saved to
+storage; at the end of the collection the intermediate \texttt{.qdstrm} file
+is converted into the \texttt{.nsys-rep} report,
+which we export to SQLite for our own analysis. The
+pipeline code marks each frame's steps with NVTX ranges (\texttt{decode},
+\texttt{inference}, \texttt{draw}, \texttt{display}), where
+\texttt{inference} covers preprocessing, the TensorRT engine and
+postprocessing. From the exported reports we derive, per frame, the GPU
+kernel time inside \texttt{inference}, the idle gaps between kernels, and the
+CPU work before and after the kernels. All runs
+use \texttt{nsys profile --trace=cuda,nvtx --cuda-graph-trace=node}. By
+default, Nsight Systems traces a CUDA graph as a whole, so a replayed graph
+appears as one item instead of its individual kernels; node-level tracing
+shows each kernel, at the price of extra overhead.
+
+\textbf{Nsight Compute} (\texttt{ncu}) examines single kernels. It inserts
+its measurement libraries into the application process and collects metrics
+from the GPU each time it detects a kernel launch that matches its filters~\cite{nvidia-ncu-guide}. The metrics come from three sources: the GPU's
+hardware performance monitors, software patching of the kernel's
+instructions, and launch or device attributes. The
+GPU can collect only a limited number of counters at a time, so a large
+metric set needs several passes over the same kernel. In kernel replay, the
+default, Nsight Compute saves the GPU memory the kernel can access before the
+first pass and restores what the kernel wrote before each further pass, so
+every pass sees the same input. By default it also
+flushes all GPU caches before each replay pass; our
+runs keep this default, so the reported cache hit rates and durations describe
+a kernel starting from cold caches, not from the warm caches it sees inside
+the pipeline. Stall reasons come from warp sampling: at a fixed interval of
+cycles, a sampler in each streaming multiprocessor picks an active warp and
+records its program counter and scheduler state.
+Its reports include occupancy, compute and memory
+throughput as a percentage of the hardware's peak (``Speed of Light''),
+memory-workload statistics such as cache hit rates, and sampled warp stall
+reasons. We use it on the most expensive kernels that Nsight Systems
+identifies, with the full section set (\texttt{--set full}), for one frame's
+launches (\texttt{--launch-skip}, \texttt{--launch-count}). By default
+Nsight Compute locks the GPU clocks during profiling; clock control is not
+supported on Orin, and NVIDIA recommends \texttt{jetson\_clocks} on Jetson
+instead~\cite{nvidia-ncu-cli}. We therefore pass
+\texttt{--clock-control none} and pin the clocks with \texttt{jetson\_clocks},
+as in the Nsight Systems runs; the per-launch durations agree with Nsight
+Systems to within 3--15\,\%.
+
+\textbf{Overhead.} Neither tool is free, and they disturb the pipeline in
+different ways. The cost of Nsight Systems' CUDA tracing is incurred per API
+call, and node-level graph tracing adds to it. The
+cost therefore depends on how often the pipeline calls the CUDA API and how
+CPU-bound it is: a pipeline whose frame time is dominated by GPU kernels loses
+little, while a pipeline that issues many short API calls per frame can lose a
+substantial part of its throughput. Section~6 quantifies this for both models
+and every optimization stage. % EDIT: point to the profiling-overhead subsection label.
+For this reason the throughput figures in this paper come from separate runs
+without a profiler, and the profiled runs are used only to explain where the
+time goes. Nsight Compute serializes the kernel launches of the profiled
+application and may replay each profiled kernel over several passes, so it changes the timing of the whole pipeline. It
+is never used to measure throughput, only to characterize individual
+kernels.
+
+\textbf{Controlled conditions.} Every measurement uses the same setup: the
+power mode is set and \texttt{jetson\_clocks} pins the CPU, GPU and memory
+clocks at the mode's maximum (at 25~W we read back GPU 918~MHz, CPU
+1344~MHz and EMC 3199~MHz, the limits in Table~\ref{tab:power-modes}); the graphical desktop is stopped; and the
+over-current counters are read before and after each run to detect
+throttling. A run script records these conditions with every result. Without
+pinned clocks and with the desktop running, identical code varied between 78
+and 101~FPS in our early tests, which hid the effect of individual changes.
