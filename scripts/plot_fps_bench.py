@@ -6,10 +6,16 @@ profiler, N runs per stage): the counterpart of plot_compare_reports.py's
 Bar = median frame time over the runs (1000 / median FPS); dots = the single
 runs; whisker = their min-max. Labels: median FPS and frame time.
 
+bench_fps.sh runs every stage without a profiler (mode plain) and under nsys
+(mode nsys); --mode picks which runs to plot (default plain, the paper's
+numbers). CSVs from before the nsys mode count as plain.
+
 Usage (from the repo root):
     python3 scripts/plot_fps_bench.py                       # reports/fps/fps25w_runs.csv
     python3 scripts/plot_fps_bench.py --set fps25w --outdir reports/figures/fps25w
-Writes <outdir>/<set>_<model>_01_frame_time.png/.pdf, one per model in the CSV.
+    python3 scripts/plot_fps_bench.py --mode nsys           # the runs under nsys
+Writes <outdir>/<set>_<model>_01_frame_time.png/.pdf (mode plain) or
+<set>_<model>_nsys_01_frame_time.png/.pdf (mode nsys), one per model in the CSV.
 """
 from __future__ import annotations
 
@@ -31,7 +37,8 @@ LABELS = {"baseline": "Baseline", "graph": "+ CUDA Graph", "gpupre": "+ GPU prep
           "nms": "+ Custom NMS", "fp16": "+ FP16"}
 
 
-def plot_model(model: str, stages: dict[str, list[float]], set_name: str, outdir: Path) -> None:
+def plot_model(model: str, stages: dict[str, list[float]], set_name: str, outdir: Path,
+               mode: str = "plain") -> None:
     names = list(stages)
     labels = [LABELS.get(n.split("_", 1)[1], n) for n in names]
     median_fps = [statistics.median(stages[n]) for n in names]
@@ -55,10 +62,12 @@ def plot_model(model: str, stages: dict[str, list[float]], set_name: str, outdir
     ax.set_xticklabels([textwrap.fill(l, 14) for l in labels])
     style_axes(ax, "End-to-end frame time (ms)")
     ax.set_ylim(0, top * 1.30)
-    ax.set_title(f"{MODELS.get(model, model)}: frame time per stage, no profiler "
+    profiler = "no profiler" if mode == "plain" else "under nsys"
+    ax.set_title(f"{MODELS.get(model, model)}: frame time per stage, {profiler} "
                  f"(median of {n_runs} runs)")
     fig.tight_layout()
-    save(fig, outdir, f"{set_name}_{model}_01_frame_time")
+    suffix = "" if mode == "plain" else f"_{mode}"
+    save(fig, outdir, f"{set_name}_{model}{suffix}_01_frame_time")
 
 
 def main() -> None:
@@ -66,17 +75,21 @@ def main() -> None:
     p.add_argument("--set", default="fps25w", help="Set name used with bench_fps.sh")
     p.add_argument("--runs-csv", default=None, help="Default: reports/fps/<set>_runs.csv")
     p.add_argument("--outdir", default=None, help="Default: reports/figures/<set>")
+    p.add_argument("--mode", default="plain", choices=["plain", "nsys"],
+                   help="plain = no profiler (default), nsys = the runs under nsys")
     args = p.parse_args()
     runs_csv = Path(args.runs_csv or f"reports/fps/{args.set}_runs.csv")
     outdir = Path(args.outdir or f"reports/figures/{args.set}")
 
     by_model: dict[str, dict[str, list[float]]] = {}
     for row in csv.DictReader(open(runs_csv)):
-        if row["fps"]:  # failed runs have no FPS
+        if row["fps"] and row.get("mode", "plain") == args.mode:  # failed runs have no FPS
             by_model.setdefault(row["stage"].split("_")[0], {}).setdefault(row["stage"], []).append(
                 float(row["fps"]))
+    if not by_model:
+        raise SystemExit(f"no {args.mode} runs with an FPS in {runs_csv}")
     for model, stages in by_model.items():
-        plot_model(model, stages, args.set, outdir)
+        plot_model(model, stages, args.set, outdir, args.mode)
 
 
 if __name__ == "__main__":

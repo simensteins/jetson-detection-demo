@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 # FPS of every optimization stage of both models (YOLOv8n and M15) in every
-# power mode: one run per stage per mode, no profiler, unattended.
+# power mode, without a profiler and under nsys, unattended.
 #
 # For each power mode the script sets it (nvpmodel), pins the clocks
 # (jetson_clocks), checks them, lets the board settle for a minute, and runs
-# the ten stages one after the other: 600 frames of data/testdata.mkv, the
-# first 50 excluded, no display; the FPS is the scripts' own. The over-current
+# the ten stages one after the other, each once without a profiler (plain)
+# and once under nsys (same flags as profile_paper_set.sh): 600 frames of
+# data/testdata.mkv, the first 50 excluded, no display; the FPS is the
+# scripts' own in both cases. With RUNS > 1 the stages are repeated in
+# rounds inside each power mode (interleaved, as in bench_fps.sh). The over-current
 # counters are read before and after every run; a run during which they
 # increased is marked throttled (kept, not dropped: see
 # docs/measurement-protocol.md).
@@ -20,23 +23,40 @@
 #
 # Environment options:
 #     STAGES="m15_fp16 yolo"  only these stages (full name, or prefix up to "_")
+#     PROFILERS="plain nsys"  plain = no profiler, nsys = under nsys (default:
+#                             both; PROFILERS=plain for the old FPS-only runs)
+#     RUNS=1                  rounds per power mode (default 1); the tables
+#                             give the median over the rounds
+#     KEEP_REPORTS=1          keep each nsys run's .nsys-rep (5-25 MB each);
+#                             0 deletes it once its FPS is read
 #     FORCE=1                 rerun runs that are already done
 # Resumable: a run already in fps.csv is skipped, so after an interruption or
 # a reboot the same command continues where it stopped. If a mode needs a
 # reboot to switch to, the script stops and says what to do.
 #
 # Writes reports/<set>/:
-#     fps.csv          one row per run (mode, stage, FPS, over-current events, throttled)
-#     fps_table.md     FPS table: one row per stage, one column per mode
+#     fps.csv          one row per run (mode, stage, profiler, round, FPS,
+#                      over-current events, throttled)
+#     fps_table.md     FPS tables, one per profiler setting: one row per
+#                      stage, one column per power mode (median over the
+#                      rounds); with both settings also the profiler overhead
+#                      (nsys FPS / plain FPS) per stage and power mode
 #     session.log      per mode: clocks, over-current counters, every result
-#     <mode>/<stage>.log  each run's own output
-# About 10-15 minutes per mode.
+#     <mode>/<stage>_<profiler>_r<NN>.log  each run's own output
+#     <mode>/<stage>_nsys_r<NN>.nsys-rep   each nsys run's report (export to
+#                      .sqlite on the Jetson: nsys export --type=sqlite ...)
+# About 10-15 minutes per power mode per round without the profiler, and
+# roughly 25-35 minutes per power mode per round with both settings.
 set -euo pipefail
 
 SET="${1:-modes}"
 MODE_ARGS=("${@:2}")   # empty = every mode
 read -r -a STAGE_SEL <<<"${STAGES:-}"
 FORCE="${FORCE:-0}"
+read -r -a PROFILERS <<<"${PROFILERS:-plain nsys}"
+RUNS="${RUNS:-1}"
+KEEP_REPORTS="${KEEP_REPORTS:-1}"
+NSYS="nsys profile --trace=cuda,nvtx --cuda-graph-trace=node --force-overwrite true"
 SRC="data/testdata.mkv"
 PAUSE=15     # seconds between runs
 SETTLE=60    # seconds after switching mode before the first run
@@ -49,6 +69,12 @@ CSV="$OUT/fps.csv"
 SESSION="$OUT/session.log"
 
 cd "$(dirname "$0")/.."
+(( ${#PROFILERS[@]} > 0 )) || { echo "PROFILERS is empty - use plain, nsys or both"; exit 1; }
+for p in "${PROFILERS[@]}"; do
+    [[ "$p" == plain || "$p" == nsys ]] || { echo "unknown profiler setting '$p' in PROFILERS - use plain and/or nsys"; exit 1; }
+done
+[[ "$RUNS" =~ ^[0-9]+$ ]] && (( RUNS > 0 )) || { echo "RUNS must be a positive number, got '$RUNS'"; exit 1; }
+[[ "$KEEP_REPORTS" == 0 || "$KEEP_REPORTS" == 1 ]] || { echo "KEEP_REPORTS must be 0 or 1"; exit 1; }
 
 # --- stages: name and command, in pipeline order ------------------------------
 NAMES=(); CMDS=()
@@ -93,6 +119,9 @@ for f in "$SRC" yolov8n.engine yolov8n_fp16_io.engine "$M15_FP32" "$M15_FP16"; d
 done
 python3 -c "import tensorrt, torch, ultralytics" 2>/dev/null \
     || { echo "activate the venv first: source .venv/bin/activate"; exit 1; }
+if [[ " ${PROFILERS[*]} " == *" nsys "* ]]; then
+    command -v nsys >/dev/null || { echo "nsys not found - install Nsight Systems or run with PROFILERS=plain"; exit 1; }
+fi
 if systemctl is-active --quiet graphical.target; then
     echo "The desktop is running. Stop it first (from SSH or Ctrl+Alt+F3):"
     echo "    sudo systemctl isolate multi-user.target"
@@ -104,31 +133,42 @@ KEEPALIVE=$!
 trap 'kill $KEEPALIVE 2>/dev/null || true' EXIT
 
 mkdir -p "$OUT"
-[[ -e "$CSV" ]] || echo "mode_id,mode,stage,fps,frames,seconds,oc_delta,throttled,started" > "$CSV"
+HEADER="mode_id,mode,stage,profiler,run,fps,frames,seconds,oc_delta,throttled,started"
+[[ -e "$CSV" ]] || echo "$HEADER" > "$CSV"
+[[ "$(head -1 "$CSV")" == "$HEADER" ]] \
+    || { echo "$CSV is from an older version of this script (other columns) - pick another set name"; exit 1; }
 oc_total() { cat /sys/class/hwmon/hwmon*/oc*_event_cnt 2>/dev/null | awk '{s += $1} END {print s + 0}'; }
 oc_list() { grep . /sys/class/hwmon/hwmon*/oc*_event_cnt 2>/dev/null | tr '\n' ' ' || true; }
-done_already() {  # done_already <mode-id> <stage>
+done_already() {  # done_already <mode-id> <stage> <profiler> <round>
     [[ "$FORCE" == 1 ]] && return 1
-    awk -F, -v m="$1" -v s="$2" '$1 == m && $3 == s && $4 != "" {f = 1} END {exit !f}' "$CSV"
+    awk -F, -v m="$1" -v s="$2" -v p="$3" -v r="$4" \
+        '$1 == m && $3 == s && $4 == p && $5 == r && $6 != "" {f = 1} END {exit !f}' "$CSV"
 }
 start_mode=$(sudo nvpmodel -q | tail -1 | tr -d ' ')
 {
     echo "=== power-mode FPS set $SET, started $(date -Is)"
     echo "--- modes: $(for m in "${MODES[@]}"; do printf '%s=%s ' "$m" "${MODE_NAME[$m]}"; done)"
     echo "--- stages: $(for i in "${SEL[@]}"; do printf '%s ' "${NAMES[$i]}"; done)"
+    echo "--- profiler: ${PROFILERS[*]}; rounds per mode: $RUNS; nsys: $NSYS; keep reports: $KEEP_REPORTS"
     echo "--- git: $(git rev-parse --short HEAD) $(git status --porcelain | wc -l) uncommitted file(s)"
     echo "--- desktop: $(systemctl is-active graphical.target || true); starting mode id $start_mode"
 } | tee -a "$SESSION"
 
-measure() {  # measure <mode-id> <stage-index>
-    local id="$1" i="$2" name="${NAMES[$2]}" log started oc0 oc1
-    log="$OUT/$(tag_of "$1")/$name.log"
-    if done_already "$id" "$name"; then
-        echo "  $name: done already, skipped"; return 0
+measure() {  # measure <mode-id> <stage-index> <profiler> <round>
+    local id="$1" i="$2" name="${NAMES[$2]}" prof="$3" r="$4" base log started oc0 oc1
+    base="$OUT/$(tag_of "$1")/${name}_${prof}_r$(printf %02d "$r")"
+    log="$base.log"
+    if done_already "$id" "$name" "$prof" "$r"; then
+        echo "  $name ($prof, round $r): done already, skipped"; return 0
     fi
     started="$(date -Is)"; oc0="$(oc_total)"
-    # Word splitting of the command string is intended (no quoted arguments in it).
-    ${CMDS[$i]} > "$log" 2>&1 || true
+    # Word splitting of the command strings is intended (no quoted arguments in them).
+    if [[ "$prof" == nsys ]]; then
+        $NSYS -o "$base" ${CMDS[$i]} > "$log" 2>&1 || true
+        (( KEEP_REPORTS )) || rm -f "$base.nsys-rep"
+    else
+        ${CMDS[$i]} > "$log" 2>&1 || true
+    fi
     oc1="$(oc_total)"
     local line fps="" frames="" secs="" throttled=0
     line="$(grep -E '^processed [0-9]+ frames in [0-9.]+s.*FPS' "$log" | tail -1 || true)"
@@ -138,11 +178,11 @@ measure() {  # measure <mode-id> <stage-index>
         fps="$(sed -E 's/.*->  *([0-9.]+) FPS.*/\1/' <<<"$line")"
     fi
     (( oc1 > oc0 )) && throttled=1
-    echo "$id,${MODE_NAME[$id]},$name,$fps,$frames,$secs,$((oc1 - oc0)),$throttled,$started" >> "$CSV"
+    echo "$id,${MODE_NAME[$id]},$name,$prof,$r,$fps,$frames,$secs,$((oc1 - oc0)),$throttled,$started" >> "$CSV"
     if [[ -z "$fps" ]]; then
-        echo "  $name: FAILED - see $log" | tee -a "$SESSION"
+        echo "  $name ($prof, round $r): FAILED - see $log" | tee -a "$SESSION"
     else
-        printf "  %-14s %6s FPS%s\n" "$name" "$fps" \
+        printf "  %-14s %-5s r%-2s %6s FPS%s\n" "$name" "$prof" "$r" "$fps" \
             "$( ((throttled)) && echo "  THROTTLED (+$((oc1 - oc0)) over-current events)")" | tee -a "$SESSION"
     fi
     sleep "$PAUSE"
@@ -178,33 +218,70 @@ set_mode() {  # set_mode <mode-id>: switch, pin the clocks, check; exits if a re
 
 for id in "${MODES[@]}"; do
     todo=0
-    for i in "${SEL[@]}"; do done_already "$id" "${NAMES[$i]}" || todo=1; done
+    for (( r = 1; r <= RUNS; r++ )); do
+        for i in "${SEL[@]}"; do
+            for p in "${PROFILERS[@]}"; do done_already "$id" "${NAMES[$i]}" "$p" "$r" || todo=1; done
+        done
+    done
     if (( todo == 0 )); then echo "mode $id ${MODE_NAME[$id]}: all runs done, skipped"; continue; fi
     set_mode "$id"
     mkdir -p "$OUT/$(tag_of "$id")"
     echo "settling ${SETTLE}s"; sleep "$SETTLE"
-    for i in "${SEL[@]}"; do measure "$id" "$i"; done
+    for (( r = 1; r <= RUNS; r++ )); do
+        (( RUNS > 1 )) && echo "--- round $r/$RUNS  $(date +%T)" | tee -a "$SESSION"
+        for i in "${SEL[@]}"; do
+            for p in "${PROFILERS[@]}"; do measure "$id" "$i" "$p" "$r"; done
+        done
+    done
     echo "--- over-current counters after mode $id: $(oc_list)" | tee -a "$SESSION"
 done
 echo "=== finished $(date -Is)" | tee -a "$SESSION"
 
-# --- table: one row per stage, one column per mode (last successful run) ------
+# --- tables: one row per stage, one column per power mode (median of the rounds) ---
 python3 - "$CSV" "$OUT/fps_table.md" <<'EOF'
-import csv, sys
+import csv, statistics, sys
 all_rows = list(csv.DictReader(open(sys.argv[1])))   # failed runs too: keeps the run order
-rows = [r for r in all_rows if r["fps"]]
 modes = list(dict.fromkeys(r["mode"] for r in all_rows))
 stages = list(dict.fromkeys(r["stage"] for r in all_rows))
-last = {(r["mode"], r["stage"]): r for r in rows}
-md = ["| Stage | " + " | ".join(modes) + " |", "|---|" + "---|" * len(modes)]
-for s in stages:
-    cells = []
-    for m in modes:
-        r = last.get((m, s))
-        cells.append("" if r is None else r["fps"] + (" ⚠" if r["throttled"] == "1" else ""))
-    md.append(f"| {s} | " + " | ".join(cells) + " |")
-md += ["", "FPS without a profiler, one run per stage and mode (600 frames, first 50 excluded). "
-       "⚠ = the over-current counters increased during the run (throttled)."]
+profs = [p for p in ("plain", "nsys") if any(r["profiler"] == p for r in all_rows)]
+# Per (power mode, stage, profiler, round) the last successful run counts (FORCE=1 reruns).
+last = {}
+for r in all_rows:
+    if r["fps"]:
+        last[(r["mode"], r["stage"], r["profiler"], r["run"])] = r
+cell = {}
+for (m, s, p, _), r in last.items():
+    cell.setdefault((m, s, p), []).append(r)
+med = {k: statistics.median(float(r["fps"]) for r in v) for k, v in cell.items()}
+
+TITLES = {"plain": "FPS without a profiler", "nsys": "FPS under nsys"}
+md = []
+for p in profs:
+    md += [f"### {TITLES[p]}", "", "| Stage | " + " | ".join(modes) + " |", "|---|" + "---|" * len(modes)]
+    for s in stages:
+        cells = []
+        for m in modes:
+            v = cell.get((m, s, p))
+            if not v:
+                cells.append(""); continue
+            txt = f"{med[(m, s, p)]:g}"
+            if len(v) > 1:
+                txt += f" (n={len(v)})"
+            if any(r["throttled"] == "1" for r in v):
+                txt += " ⚠"
+            cells.append(txt)
+        md.append(f"| {s} | " + " | ".join(cells) + " |")
+    md.append("")
+if len(profs) == 2:
+    md += ["### Profiler overhead: nsys FPS / plain FPS", "", "| Stage | " + " | ".join(modes) + " |",
+           "|---|" + "---|" * len(modes)]
+    for s in stages:
+        cells = [f"{med[(m, s, 'nsys')] / med[(m, s, 'plain')]:.3f}"
+                 if (m, s, "nsys") in med and (m, s, "plain") in med else "" for m in modes]
+        md.append(f"| {s} | " + " | ".join(cells) + " |")
+    md.append("")
+md += ["600 frames per run, first 50 excluded; median over the rounds where n > 1. "
+       "⚠ = the over-current counters increased during at least one of the runs (throttled)."]
 open(sys.argv[2], "w").write("\n".join(md) + "\n")
 print("\n" + "\n".join(md))
 EOF
