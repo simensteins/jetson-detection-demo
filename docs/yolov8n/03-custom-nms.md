@@ -4,6 +4,8 @@
 
 > These numbers were measured on `data/vtest.avi` (768×576) in September 2026, before the measurement protocol was fixed (power mode and clocks not recorded). The final, comparable numbers are in [results-paper25w.md](../results-paper25w.md).
 
+> **Replaced in November 2026.** The Fast NMS with 100 candidates described below cost about 4 points mAP50 on COCO (54.3 → 49.9, small objects 18.6 → 15.0; `reports/eval/yolo_coco_summary.md`): Fast NMS over-suppresses chains of overlapping boxes, and 100 candidates across 80 classes cut real boxes before NMS. Iterations 3 and 4 now use the shared class-aware Cluster-NMS in `scripts/yolo_fixed_nms.py`, the same algorithm as M15's: exactly standard NMS, 300 candidates (`--nms-candidates`), IoU 0.7 like the baseline (`--iou`). Iteration 2 also uses IoU 0.7 now (it used Ultralytics' `non_max_suppression` default, 0.45). Tested against `torchvision.ops.batched_nms` on synthetic crowded scenes: identical in FP32 and FP16.
+
 **This iteration builds on and keeps Iterations 1 (CUDA Graph) and 2 (GPU Preprocessing) in place.** The model is still invoked via captured graph replay exactly as in Iteration 1; preprocessing is still fully GPU-side exactly as in Iteration 2 (step 2b). The only thing this iteration changes is how NMS (non-max suppression) is computed.
 
 ---

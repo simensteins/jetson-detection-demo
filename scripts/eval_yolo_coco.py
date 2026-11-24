@@ -9,12 +9,13 @@ that was profiled:
     baseline       src/detect.py: Ultralytics predict() - CPU letterbox,
                    Ultralytics NMS (iou 0.7, max 300 detections), FP32 engine
     gpupre         Iteration 2: GPU preprocessing + Ultralytics
-                   non_max_suppression() as that script calls it (iou 0.45),
+                   non_max_suppression() as that script calls it (iou 0.7),
                    FP32 engine
-    customnms      Iteration 3: GPU preprocessing + the fixed-shape Fast NMS
-                   (top 100 candidates, iou 0.45), FP32 engine
+    customnms      Iteration 3: GPU preprocessing + the fixed-shape
+                   Cluster-NMS (top 300 candidates, iou 0.7, exactly standard
+                   NMS; scripts/yolo_fixed_nms.py), FP32 engine
     fp16           Iteration 4 (the final pipeline): FP16 engine with FP16
-                   preprocessing + Fast NMS
+                   preprocessing + the fixed-shape Cluster-NMS
     fp16_ultranms  Not a stage - the FP16 engine with Iteration 2's Ultralytics
                    NMS, so FP16's own effect is gpupre vs. fp16_ultranms
 
@@ -82,8 +83,10 @@ BUCKETS = [("0", 0, 0), ("1-3", 1, 3), ("4-10", 4, 10), (">10", 11, 10**9)]  # l
 IMGSZ = 640
 EVAL_CONF = 0.001
 DEPLOY_CONF = 0.25
-NMS_IOU_ITER = 0.45  # what Iterations 2-4 use (non_max_suppression default / --iou default)
+NMS_IOU_ITER = 0.7  # what Iterations 2-4 use (--iou default, the same as the baseline)
 NMS_IOU_PREDICT = 0.7  # Ultralytics predict() default, used by src/detect.py
+NMS_K = 300  # top-k candidates of the fixed-shape NMS; set from --nms-candidates
+CLASSES = None  # None = all 80; [0] = person only (--person-only)
 
 
 def parse_args() -> argparse.Namespace:
@@ -96,6 +99,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--max-images", type=int, default=0, help="0 = all images")
     p.add_argument("--max-objects", type=int, default=0,
                    help="Only images with at most this many labelled (non-crowd) objects; 0 = no limit")
+    p.add_argument("--nms-candidates", type=int, default=it3.MAX_CANDIDATES,
+                   help="Top-k candidates of the fixed-shape NMS (default 300, as the scripts)")
+    p.add_argument("--person-only", action="store_true",
+                   help="Detect and score only the person class (COCO category 1), as the SAR "
+                        "task: every pipeline is restricted to it (Ultralytics classes=[0], the "
+                        "fixed NMS's classes) and COCOeval counts only that category")
     p.add_argument("--outdir", default="reports/eval")
     return p.parse_args()
 
@@ -129,9 +138,11 @@ def ultralytics_nms(raw: torch.Tensor) -> torch.Tensor:
     with the eval conf; the time limit is lifted so conf 0.001 is never cut
     short (it only exists to bound worst-case latency)."""
     try:
-        out = it2.non_max_suppression(raw.float(), conf_thres=EVAL_CONF, max_time_img=10.0)
+        out = it2.non_max_suppression(raw.float(), conf_thres=EVAL_CONF, iou_thres=NMS_IOU_ITER,
+                                      classes=CLASSES, max_time_img=10.0)
     except TypeError:
-        out = it2.non_max_suppression(raw.float(), conf_thres=EVAL_CONF)
+        out = it2.non_max_suppression(raw.float(), conf_thres=EVAL_CONF, iou_thres=NMS_IOU_ITER,
+                                      classes=CLASSES)
     return out[0]
 
 
@@ -140,7 +151,7 @@ def detect(pipeline: str, img: np.ndarray, runners: dict) -> np.ndarray:
     h0, w0 = img.shape[:2]
     if pipeline == "baseline":
         r = runners["predict"].predict(img, conf=EVAL_CONF, iou=NMS_IOU_PREDICT, imgsz=IMGSZ,
-                                       max_det=300, verbose=False)[0].boxes
+                                       max_det=300, classes=CLASSES, verbose=False)[0].boxes
         return torch.cat([r.xyxy, r.conf[:, None], r.cls[:, None]], 1).cpu().numpy()
 
     scale, new_hw, pad = it2.compute_letterbox_params(h0, w0, IMGSZ)
@@ -153,14 +164,17 @@ def detect(pipeline: str, img: np.ndarray, runners: dict) -> np.ndarray:
         it2.preprocess_gpu(gpu_raw, new_hw, pad, runner.input)
     raw = runner.run()
 
+    classes = None if CLASSES is None else torch.tensor(CLASSES, device=raw.device)
     if pipeline in ("gpupre", "fp16_ultranms"):
         dets = ultralytics_nms(raw)
     elif pipeline == "customnms":
-        dets = it3.custom_nms(raw, conf_thres=EVAL_CONF, iou_thres=NMS_IOU_ITER)
+        dets = it3.custom_nms(raw, conf_thres=EVAL_CONF, iou_thres=NMS_IOU_ITER, k=NMS_K,
+                              classes=classes)
     else:  # fp16
-        dets = it4.custom_nms(raw, conf_thres=EVAL_CONF, iou_thres=NMS_IOU_ITER)
+        dets = it4.custom_nms(raw, conf_thres=EVAL_CONF, iou_thres=NMS_IOU_ITER, k=NMS_K,
+                              classes=classes)
     dets = dets.float().cpu().numpy()
-    dets = dets[dets[:, 4] > 0]  # Fast NMS pads with score 0
+    dets = dets[dets[:, 4] > 0]  # the fixed-shape NMS pads with score 0
     left, top = pad[0], pad[2]
     dets[:, [0, 2]] = ((dets[:, [0, 2]] - left) / scale).clip(0, w0)
     dets[:, [1, 3]] = ((dets[:, [1, 3]] - top) / scale).clip(0, h0)
@@ -194,7 +208,10 @@ def greedy_matches(pred: np.ndarray, ref: np.ndarray, iou_thr: float = 0.5) -> i
 
 
 def main() -> None:
+    global NMS_K, CLASSES
     args = parse_args()
+    NMS_K = args.nms_candidates
+    CLASSES = [0] if args.person_only else None
     try:
         from pycocotools.coco import COCO
         from pycocotools.cocoeval import COCOeval
@@ -204,12 +221,14 @@ def main() -> None:
         raise SystemExit(f"{args.annotations} not found - run: bash scripts/download_coco_val.sh")
     gt = COCO(args.annotations)
     img_ids = sorted(gt.getImgIds())
-    n_objects = {iid: len(gt.getAnnIds(imgIds=iid, iscrowd=False)) for iid in img_ids}
+    cat_ids = [1] if args.person_only else None   # COCO category 1 = person
+    n_objects = {iid: len(gt.getAnnIds(imgIds=iid, catIds=cat_ids or [], iscrowd=False))
+                 for iid in img_ids}
     if args.max_objects:
         img_ids = [i for i in img_ids if n_objects[i] <= args.max_objects]
     if args.max_images:
         img_ids = img_ids[:args.max_images]
-    tag = f"_max{args.max_objects}obj" if args.max_objects else ""
+    tag = ("_person" if args.person_only else "") + (f"_max{args.max_objects}obj" if args.max_objects else "")
     buckets = [(name, [i for i in img_ids if lo <= n_objects[i] <= hi])
                for name, lo, hi in BUCKETS]
     buckets = [(name, ids) for name, ids in buckets if ids]
@@ -221,7 +240,7 @@ def main() -> None:
     # Ground truth per image (non-crowd), in the 80-class index, for P/R at 0.25.
     gt_boxes = {}
     for iid in img_ids:
-        anns = [a for a in gt.loadAnns(gt.getAnnIds(imgIds=iid, iscrowd=False))]
+        anns = [a for a in gt.loadAnns(gt.getAnnIds(imgIds=iid, catIds=cat_ids or [], iscrowd=False))]
         gt_boxes[iid] = np.array([[a["bbox"][0], a["bbox"][1], a["bbox"][0] + a["bbox"][2],
                                    a["bbox"][1] + a["bbox"][3], 1.0, cat80[a["category_id"]]]
                                   for a in anns], dtype=np.float32).reshape(-1, 6)
@@ -263,6 +282,8 @@ def main() -> None:
                 return [float("nan")] * 12
             ev = COCOeval(gt, res, "bbox")
             ev.params.imgIds = ids
+            if cat_ids:
+                ev.params.catIds = cat_ids
             with contextlib.redirect_stdout(sys.stdout if verbose else io.StringIO()):
                 ev.evaluate(); ev.accumulate(); ev.summarize()
             return [v if v >= 0 else float("nan") for v in ev.stats]  # COCO's -1 = no such objects

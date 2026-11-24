@@ -109,7 +109,7 @@ image. Each such step makes the CPU wait for the GPU to learn the size before
 it can continue, and the variable shapes prevent capturing NMS into a graph.
 The postprocessing time also grows with the number of detections, so frames
 with targets take longer. We replace it with a fixed-shape version: the
-$k$ highest-scoring candidates are selected (\texttt{topk}, $k = 100$),
+$k$ highest-scoring candidates are selected (\texttt{topk}),
 suppression is computed as a $k \times k$ IoU matrix, and the output is
 always a $k \times 6$ tensor in which unused rows have a score of zero.
 Nothing in it depends on the data, so the CPU can queue all of its operations
@@ -123,16 +123,21 @@ early, it can cost slightly more. Its main effect is on the slowest frames
 rather than on the mean, and the size of the gain depends on how many
 targets the video contains.
 
-Both models get this fixed-shape NMS. For M15 we go one step further and
-capture it into the same CUDA graph as the engine, so a frame's network and
-postprocessing replay with one call and issue the same work regardless of the
-image's content; for YOLOv8n it runs after the graph replay. The suppression
-step also differs. YOLOv8n uses Fast NMS~\cite{bolya2019yolact}, a one-step
-approximation that can remove slightly more boxes than standard NMS, with an
-IoU threshold of 0.45 instead of the baseline's 0.7. M15 uses
-Cluster-NMS~\cite{zheng2020clusternms}, which gives exactly the result of
-standard NMS; in our test runs no frame had more than $k$ candidates above
-the threshold, so M15's fixed NMS matched standard NMS on every frame.
+Both models use the same suppression rule, Cluster-NMS~\cite{zheng2020clusternms}:
+a box is removed only if a higher-scoring box that is itself kept overlaps it,
+repeated a fixed number of times. This gives exactly the result of standard
+NMS while keeping the shapes fixed. For YOLOv8n's 80 classes, boxes are
+shifted by their class so that boxes of different classes never suppress each
+other, and $k = 300$, Ultralytics' limit on detections per image; both models
+use the baseline's IoU threshold of 0.7. Our first version for YOLOv8n used
+Fast NMS~\cite{bolya2019yolact}, a single matrix step that also lets removed
+boxes suppress others, with $k = 100$; on COCO it cost about four points of
+mAP50, mostly on small objects, which is why both models now use the exact
+rule. For M15 ($k = 100$) we go one step further and capture the NMS into the
+same CUDA graph as the engine, so a frame's network and postprocessing replay
+with one call; for YOLOv8n it runs after the graph replay. In our test runs no
+M15 frame had more than $k$ candidates above the threshold, so its fixed NMS
+matched standard NMS on every frame.
 
 \textbf{FP16.} The last stage builds the engine with 16-bit floating-point
 layers. Ultralytics' FP16 export keeps FP32 input and output tensors, so

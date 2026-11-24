@@ -37,10 +37,12 @@ all.
 The one deliberate exception: NMS's area/IoU math. FP16's max representable value
 is 65504 - a box spanning most of a 640x640 frame has an area near
 640*640 = 409,600, which overflows FP16 and would silently produce inf/nan in the
-IoU/union computation. Rather than risk that, the selected MAX_CANDIDATES=100 box
+IoU/union computation. Rather than risk that, the selected MAX_CANDIDATES (300) box
 tensor (tiny) is cast to FP32 immediately after `torch.topk` picks it, and the
-suppression math runs in FP32 from there - one explicit, understood cast on 100
-numbers, not a whole-frame casting problem repeated every frame.
+suppression math runs in FP32 from there - one explicit, understood cast on a few
+hundred numbers, not a whole-frame casting problem repeated every frame. The NMS
+itself is the shared Cluster-NMS in scripts/yolo_fixed_nms.py (exactly standard
+NMS; it replaced the Fast NMS with 100 candidates in November 2026).
 
 **Correctness check**: run with display first, and separately compare mAP against
 the FP32 engine with `model.val()` (see the FP16 Research Notion page) before
@@ -69,11 +71,11 @@ import yaml
 from ultralytics import YOLO
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from src.profiling import nvtx_range  # noqa: E402
 from src.sources import open_source  # noqa: E402
+from yolo_fixed_nms import CANDIDATES as MAX_CANDIDATES, cluster_nms  # noqa: E402  (scripts/)
 
-MAX_CANDIDATES = 100  # matches COCO's standard max-100-detections-per-image convention
-CLASS_OFFSET = 7680.0  # larger than any plausible box coordinate at imgsz=640
 
 
 def parse_args() -> argparse.Namespace:
@@ -90,7 +92,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--warmup-frames", type=int, default=None,
                    help="Frames to exclude from the FPS timer (in addition to the "
                         "engine/graph warm-up this script always does before the loop)")
-    p.add_argument("--iou", type=float, default=0.45, help="NMS IoU threshold")
+    p.add_argument("--iou", type=float, default=0.7,
+                   help="NMS IoU threshold (0.7 = Ultralytics predict(), as the baseline)")
+    p.add_argument("--nms-candidates", type=int, default=MAX_CANDIDATES,
+                   help="Fixed top-k candidates for the NMS (default: Ultralytics' max_det, 300)")
     return p.parse_args()
 
 
@@ -138,56 +143,15 @@ def preprocess_gpu_fp16(gpu_raw: torch.Tensor, new_hw: tuple[int, int],
             border.fill_(114 / 255.0)
 
 
-def box_iou_matrix(boxes_xyxy: torch.Tensor) -> torch.Tensor:
-    """Unchanged from Iteration 3 - runs in FP32 (see custom_nms for why)."""
-    area = (boxes_xyxy[:, 2] - boxes_xyxy[:, 0]).clamp(min=0) * \
-           (boxes_xyxy[:, 3] - boxes_xyxy[:, 1]).clamp(min=0)
-    x1 = torch.max(boxes_xyxy[:, 0].unsqueeze(1), boxes_xyxy[:, 0].unsqueeze(0))
-    y1 = torch.max(boxes_xyxy[:, 1].unsqueeze(1), boxes_xyxy[:, 1].unsqueeze(0))
-    x2 = torch.min(boxes_xyxy[:, 2].unsqueeze(1), boxes_xyxy[:, 2].unsqueeze(0))
-    y2 = torch.min(boxes_xyxy[:, 3].unsqueeze(1), boxes_xyxy[:, 3].unsqueeze(0))
-    inter = (x2 - x1).clamp(min=0) * (y2 - y1).clamp(min=0)
-    union = area.unsqueeze(1) + area.unsqueeze(0) - inter
-    return inter / union.clamp(min=1e-9)
-
-
-def custom_nms(raw_output: torch.Tensor, conf_thres: float, iou_thres: float) -> torch.Tensor:
-    """raw_output is FP16 (the model's actual output dtype - no cast happened to
-    get it there). Candidate selection (max/where/topk) runs directly in FP16:
-    every value involved is either a score (0-1) or a raw box coordinate (0-640),
-    both safely inside FP16's range.
-
-    The MAX_CANDIDATES=100 selected boxes are then cast to FP32 before any
-    area/IoU math - see the module docstring for why (FP16 overflows on box
-    areas up to ~409,600 at this resolution). This is the ONE deliberate cast in
-    this script, on a 100-row tensor once a frame, not a whole-frame cast
-    repeated at every preprocessing step."""
-    pred = raw_output[0]  # (84, 8400), FP16
-    boxes_cxcywh = pred[:4]  # (4, 8400), FP16
-    scores_all, classes_all = pred[4:].max(dim=0)  # FP16 reduction - safe, values are 0-1
-
-    scores_all = torch.where(scores_all >= conf_thres, scores_all, torch.zeros_like(scores_all))
-
-    topk_scores, topk_idx = torch.topk(scores_all, k=MAX_CANDIDATES)  # FP16, fixed (K,), sorted desc
-    topk_classes = classes_all[topk_idx]
-    topk_cxcywh = boxes_cxcywh[:, topk_idx].T.float()  # <- the one deliberate FP16 -> FP32 cast
-    topk_scores = topk_scores.float()
-
-    cx, cy, w, h = topk_cxcywh.unbind(-1)
-    boxes_xyxy = torch.stack([cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2], dim=-1)  # FP32
-
-    # Class-aware Fast NMS (see Iteration 3): offset boxes per class, full IoU
-    # matrix, suppress a box if it overlaps too much with any earlier
-    # (higher-scoring, since topk is sorted descending) box.
-    offset = topk_classes.float().unsqueeze(1) * CLASS_OFFSET
-    ious = box_iou_matrix(boxes_xyxy + offset)
-    ious_earlier_only = torch.triu(ious, diagonal=1)
-    max_iou_with_earlier = ious_earlier_only.max(dim=0).values
-    keep = (max_iou_with_earlier <= iou_thres) & (topk_scores > 0)
-    final_scores = torch.where(keep, topk_scores, torch.zeros_like(topk_scores))
-
-    return torch.cat([boxes_xyxy, final_scores.unsqueeze(1), topk_classes.float().unsqueeze(1)], dim=1)
-
+def custom_nms(raw_output: torch.Tensor, conf_thres: float, iou_thres: float,
+               k: int = MAX_CANDIDATES, classes: torch.Tensor | None = None) -> torch.Tensor:
+    """raw_output: (1, 84, 8400) raw model output (4 box coords + 80 class
+    scores per candidate, cxcywh). Returns a FIXED (k, 6) tensor of
+    [x1, y1, x2, y2, score, cls]; rows that are not detections have score 0
+    and must be filtered by the caller. Class-aware Cluster-NMS over the k
+    highest-scoring candidates, the same algorithm as M15's NMS: exactly the
+    result of standard NMS (see scripts/yolo_fixed_nms.py)."""
+    return cluster_nms(raw_output, conf_thres, iou_thres, k=k, classes=classes)
 
 def draw_detections(frame: np.ndarray, dets_cpu: np.ndarray,
                      scale: float, pad: tuple[int, int]) -> np.ndarray:
@@ -310,7 +274,8 @@ def main() -> None:
                 preprocess_gpu_fp16(gpu_raw, new_hw, pad_lrtb, input_buf)
                 graph.replay()
                 stream.synchronize()
-                preds = custom_nms(output_buf, conf_thres=conf, iou_thres=args.iou)
+                preds = custom_nms(output_buf, conf_thres=conf, iou_thres=args.iou,
+                                   k=args.nms_candidates)
                 # Single GPU->CPU sync of the fixed (MAX_CANDIDATES, 6) tensor
                 # here, inside "inference" - see Iteration 3's draw_detections fix.
                 preds_cpu = preds.cpu().numpy()

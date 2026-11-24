@@ -69,6 +69,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--warmup-frames", type=int, default=None,
                    help="Frames to exclude from the FPS timer (in addition to the "
                         "engine/graph warm-up this script always does before the loop)")
+    p.add_argument("--iou", type=float, default=0.7,
+                   help="NMS IoU threshold (0.7 = Ultralytics predict(), as the baseline; "
+                        "non_max_suppression's own default is 0.45)")
     return p.parse_args()
 
 
@@ -219,7 +222,7 @@ def main() -> None:
                 preprocess_gpu(gpu_raw, new_hw, pad_lrtb, input_buf)
                 graph.replay()
                 stream.synchronize()
-                preds = non_max_suppression(output_buf, conf_thres=conf)[0]
+                preds = non_max_suppression(output_buf, conf_thres=conf, iou_thres=args.iou)[0]
 
             with nvtx_range("draw"):
                 annotated = draw_detections(frame, preds, scale, pad_left_top)

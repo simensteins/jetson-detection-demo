@@ -37,17 +37,16 @@ This implementation:
   1. torch.topk(scores, k=MAX_CANDIDATES) - ALWAYS returns exactly
      MAX_CANDIDATES entries regardless of how many real detections exist,
      sorted by score descending. Fixed shape, no data-dependent sizing.
-     MAX_CANDIDATES=100 matches COCO's own standard evaluation convention
-     (max 100 detections per image), not an arbitrary choice.
-  2. "Fast NMS" (Bolya et al., the YOLACT paper) over those K candidates:
-     compute the full (K,K) pairwise IoU matrix, then suppress a box if it
-     overlaps too much with any *higher-scoring* box, in one fully
-     vectorized pass - no sequential/data-dependent loop. This is a known,
-     standard approximation of classic greedy NMS (can very rarely
-     over-suppress in complex 3+-box overlap chains, since it doesn't
-     check whether the higher-scoring box was itself already suppressed)
-     - an accepted, well-precedented tradeoff for exactly this class of
-     problem.
+     MAX_CANDIDATES = 300, Ultralytics' max_det (--nms-candidates).
+  2. Cluster-NMS (Zheng et al.) over those K candidates: the (K,K) IoU
+     matrix says which higher-scoring box overlaps which; a box is dropped
+     only if a higher-scoring box that is itself kept overlaps it. A fixed
+     number of passes gives exactly the result of standard NMS, with no
+     data-dependent loop. (Until November 2026 this was "Fast NMS" from
+     YOLACT - one pass, which over-suppresses chains of overlapping boxes -
+     with 100 candidates; together they cost ~4 points mAP50 on COCO.)
+     The code is shared with the FP16 iteration and the COCO evaluation:
+     scripts/yolo_fixed_nms.py, the same algorithm as M15's NMS.
   3. Class-aware suppression via the standard box-offset trick (offset
      each box spatially by a large multiple of its class index before
      computing IoU, so boxes of different classes never overlap) -
@@ -86,11 +85,11 @@ import yaml
 from ultralytics import YOLO
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from src.profiling import nvtx_range  # noqa: E402
 from src.sources import open_source  # noqa: E402
+from yolo_fixed_nms import CANDIDATES as MAX_CANDIDATES, cluster_nms  # noqa: E402  (scripts/)
 
-MAX_CANDIDATES = 100  # matches COCO's standard max-100-detections-per-image convention
-CLASS_OFFSET = 7680.0  # larger than any plausible box coordinate at imgsz=640
 
 
 def parse_args() -> argparse.Namespace:
@@ -104,7 +103,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--warmup-frames", type=int, default=None,
                    help="Frames to exclude from the FPS timer (in addition to the "
                         "engine/graph warm-up this script always does before the loop)")
-    p.add_argument("--iou", type=float, default=0.45, help="NMS IoU threshold")
+    p.add_argument("--iou", type=float, default=0.7,
+                   help="NMS IoU threshold (0.7 = Ultralytics predict(), as the baseline)")
+    p.add_argument("--nms-candidates", type=int, default=MAX_CANDIDATES,
+                   help="Fixed top-k candidates for the NMS (default: Ultralytics' max_det, 300)")
     return p.parse_args()
 
 
@@ -151,57 +153,15 @@ def preprocess_gpu(gpu_raw: torch.Tensor, new_hw: tuple[int, int],
             border.fill_(114 / 255.0)
 
 
-def box_iou_matrix(boxes_xyxy: torch.Tensor) -> torch.Tensor:
-    """boxes_xyxy: (K, 4). Returns the full (K, K) pairwise IoU matrix,
-    fully vectorized, fixed shape - no loops, no data-dependent sizing."""
-    area = (boxes_xyxy[:, 2] - boxes_xyxy[:, 0]).clamp(min=0) * \
-           (boxes_xyxy[:, 3] - boxes_xyxy[:, 1]).clamp(min=0)  # (K,)
-    x1 = torch.max(boxes_xyxy[:, 0].unsqueeze(1), boxes_xyxy[:, 0].unsqueeze(0))  # (K,K)
-    y1 = torch.max(boxes_xyxy[:, 1].unsqueeze(1), boxes_xyxy[:, 1].unsqueeze(0))
-    x2 = torch.min(boxes_xyxy[:, 2].unsqueeze(1), boxes_xyxy[:, 2].unsqueeze(0))
-    y2 = torch.min(boxes_xyxy[:, 3].unsqueeze(1), boxes_xyxy[:, 3].unsqueeze(0))
-    inter = (x2 - x1).clamp(min=0) * (y2 - y1).clamp(min=0)  # (K,K)
-    union = area.unsqueeze(1) + area.unsqueeze(0) - inter
-    return inter / union.clamp(min=1e-9)
-
-
-def custom_nms(raw_output: torch.Tensor, conf_thres: float, iou_thres: float) -> torch.Tensor:
+def custom_nms(raw_output: torch.Tensor, conf_thres: float, iou_thres: float,
+               k: int = MAX_CANDIDATES, classes: torch.Tensor | None = None) -> torch.Tensor:
     """raw_output: (1, 84, 8400) raw model output (4 box coords + 80 class
-    scores per candidate, cxcywh format). Returns a FIXED (MAX_CANDIDATES, 6)
-    tensor of [x1, y1, x2, y2, score, cls] - always this shape, regardless
-    of how many real detections exist. Entries beyond the real detection
-    count have score 0 and must be filtered by the caller."""
-    pred = raw_output[0]  # (84, 8400)
-    boxes_cxcywh = pred[:4]  # (4, 8400)
-    scores_all, classes_all = pred[4:].max(dim=0)  # (8400,), (8400,) - fixed shape reduction
-
-    # Zero out below-threshold scores (shape-preserving - no filtering) so
-    # they sort to the bottom and topk naturally excludes them if there
-    # are >= MAX_CANDIDATES real detections, or leaves harmless score-0
-    # padding entries if there are fewer.
-    scores_all = torch.where(scores_all >= conf_thres, scores_all, torch.zeros_like(scores_all))
-
-    topk_scores, topk_idx = torch.topk(scores_all, k=MAX_CANDIDATES)  # fixed (K,), sorted desc
-    topk_classes = classes_all[topk_idx]  # (K,)
-    topk_cxcywh = boxes_cxcywh[:, topk_idx].T  # (K, 4)
-
-    cx, cy, w, h = topk_cxcywh.unbind(-1)
-    boxes_xyxy = torch.stack([cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2], dim=-1)  # (K,4)
-
-    # Class-aware Fast NMS: offset boxes per class so different classes
-    # never overlap, then suppress a box if it overlaps too much with any
-    # EARLIER (higher-scoring, since topk is sorted descending) box. This
-    # is the YOLACT "Fast NMS" approximation - fully vectorized, fixed
-    # shape, no data-dependent loop.
-    offset = topk_classes.float().unsqueeze(1) * CLASS_OFFSET
-    ious = box_iou_matrix(boxes_xyxy + offset)  # (K, K)
-    ious_earlier_only = torch.triu(ious, diagonal=1)  # only i < j (i is higher-scored)
-    max_iou_with_earlier = ious_earlier_only.max(dim=0).values  # (K,)
-    keep = (max_iou_with_earlier <= iou_thres) & (topk_scores > 0)
-    final_scores = torch.where(keep, topk_scores, torch.zeros_like(topk_scores))
-
-    return torch.cat([boxes_xyxy, final_scores.unsqueeze(1), topk_classes.float().unsqueeze(1)], dim=1)
-
+    scores per candidate, cxcywh). Returns a FIXED (k, 6) tensor of
+    [x1, y1, x2, y2, score, cls]; rows that are not detections have score 0
+    and must be filtered by the caller. Class-aware Cluster-NMS over the k
+    highest-scoring candidates, the same algorithm as M15's NMS: exactly the
+    result of standard NMS (see scripts/yolo_fixed_nms.py)."""
+    return cluster_nms(raw_output, conf_thres, iou_thres, k=k, classes=classes)
 
 def draw_detections(frame: np.ndarray, dets_cpu: np.ndarray,
                      scale: float, pad: tuple[int, int]) -> np.ndarray:
@@ -311,7 +271,8 @@ def main() -> None:
                 preprocess_gpu(gpu_raw, new_hw, pad_lrtb, input_buf)
                 graph.replay()
                 stream.synchronize()
-                preds = custom_nms(output_buf, conf_thres=conf, iou_thres=args.iou)
+                preds = custom_nms(output_buf, conf_thres=conf, iou_thres=args.iou,
+                                   k=args.nms_candidates)
                 # Single GPU->CPU sync of the fixed (MAX_CANDIDATES, 6) tensor
                 # here, inside "inference" - not one sync per op scattered
                 # through draw_detections (see its docstring).
