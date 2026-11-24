@@ -112,11 +112,10 @@ with targets take longer. We replace it with a fixed-shape version: the
 $k$ highest-scoring candidates are selected (\texttt{topk}),
 suppression is computed as a $k \times k$ IoU matrix, and the output is
 always a $k \times 6$ tensor in which unused rows have a score of zero.
-Nothing in it depends on the data, so the CPU can queue all of its operations
-without waiting, and the only synchronization is the single copy of the
-result to the CPU at the end. This removes the waits even when NMS runs
-outside the graph; capturing it as well also removes the cost of launching
-its operations one by one. The fixed version costs the same on every frame.
+Nothing in it depends on the data, so the CPU never waits for the GPU, and
+the only synchronization is the single copy of the result to the CPU at the
+end. Because the shapes are fixed, the NMS can also be captured into the CUDA
+graph, which removes the cost of launching its operations one by one. The fixed version costs the same on every frame.
 Its gain therefore grows with the number of candidates above the threshold,
 up to $k$, while on frames without detections, where standard NMS stops
 early, it can cost slightly more. Its main effect is on the slowest frames
@@ -133,11 +132,13 @@ use the baseline's IoU threshold of 0.7. Our first version for YOLOv8n used
 Fast NMS~\cite{bolya2019yolact}, a single matrix step that also lets removed
 boxes suppress others, with $k = 100$; on COCO it cost about four points of
 mAP50, mostly on small objects, which is why both models now use the exact
-rule. For M15 ($k = 100$) we go one step further and capture the NMS into the
-same CUDA graph as the engine, so a frame's network and postprocessing replay
-with one call; for YOLOv8n it runs after the graph replay. In our test runs no
-M15 frame had more than $k$ candidates above the threshold, so its fixed NMS
-matched standard NMS on every frame.
+rule. In both models the NMS is captured into the same CUDA graph as the
+engine ($k = 100$ for M15), so a frame's network and postprocessing replay with
+one call and issue the same work regardless of the image's content. Each run
+reports whether more than $k$ candidates passed the threshold or the passes
+did not converge, the only cases in which the result could differ from
+standard NMS; in our M15 test runs neither happened.
+% EDIT: add YOLOv8n's numbers once the graph version has run (the scripts print them).
 
 \textbf{FP16.} The last stage builds the engine with 16-bit floating-point
 layers. Ultralytics' FP16 export keeps FP32 input and output tensors, so

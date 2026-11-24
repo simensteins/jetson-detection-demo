@@ -25,6 +25,12 @@ that makes the CPU wait for the GPU. Rows that are not detections have score
      convergence, which would need a sync); `iters` passes are exact for
      chains of up to `iters` boxes.
 
+With with_stats=True it also returns, as M15's postprocess_fixed does, a (3,)
+FP32 tensor - computed on the GPU, no extra sync - that tells whether the
+fixed sizes were ever too small: [0] candidates above the threshold among the
+top k, [1] 1 if all k were above it (more may have been cut before NMS), [2]
+1 if `iters` passes were not enough (one more pass would change the result).
+
 topk runs in the output's dtype (FP16 for Iteration 4); the k selected rows
 are cast to FP32 before any box maths, because box areas at 640x640 reach
 409,600, beyond FP16's 65,504.
@@ -52,7 +58,7 @@ def box_iou_matrix(boxes_xyxy: torch.Tensor) -> torch.Tensor:
 
 def cluster_nms(raw_output: torch.Tensor, conf_thres: float, iou_thres: float,
                 k: int = CANDIDATES, iters: int = ITERS, max_det: int = MAX_DET,
-                classes: torch.Tensor | None = None) -> torch.Tensor:
+                classes: torch.Tensor | None = None, with_stats: bool = False):
     """raw_output: (1, 4 + nc, N) YOLOv8 output, cxcywh boxes in input pixels.
     classes: optional 1-D long tensor of class indices to keep (on the same
     device). -> FIXED (k, 6) [x1, y1, x2, y2, score, cls], unused rows score 0."""
@@ -74,6 +80,10 @@ def cluster_nms(raw_output: torch.Tensor, conf_thres: float, iou_thres: float,
     keep = candidate
     for _ in range(iters):
         keep = candidate & ~(suppresses & keep.unsqueeze(1)).any(dim=0)
+    unconverged = (keep != (candidate & ~(suppresses & keep.unsqueeze(1)).any(dim=0))).any()
     keep = keep & (keep.cumsum(0) <= max_det)
     scores = torch.where(keep, topk_scores, torch.zeros_like(topk_scores))
-    return torch.cat([boxes_xyxy, scores.unsqueeze(1), topk_classes.unsqueeze(1)], dim=1)
+    dets = torch.cat([boxes_xyxy, scores.unsqueeze(1), topk_classes.unsqueeze(1)], dim=1)
+    if not with_stats:
+        return dets
+    return dets, torch.stack([candidate.sum(), candidate[-1], unconverged]).float()

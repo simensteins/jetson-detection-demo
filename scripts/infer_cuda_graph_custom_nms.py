@@ -154,14 +154,16 @@ def preprocess_gpu(gpu_raw: torch.Tensor, new_hw: tuple[int, int],
 
 
 def custom_nms(raw_output: torch.Tensor, conf_thres: float, iou_thres: float,
-               k: int = MAX_CANDIDATES, classes: torch.Tensor | None = None) -> torch.Tensor:
+               k: int = MAX_CANDIDATES, classes: torch.Tensor | None = None,
+               with_stats: bool = False):
     """raw_output: (1, 84, 8400) raw model output (4 box coords + 80 class
     scores per candidate, cxcywh). Returns a FIXED (k, 6) tensor of
     [x1, y1, x2, y2, score, cls]; rows that are not detections have score 0
     and must be filtered by the caller. Class-aware Cluster-NMS over the k
     highest-scoring candidates, the same algorithm as M15's NMS: exactly the
     result of standard NMS (see scripts/yolo_fixed_nms.py)."""
-    return cluster_nms(raw_output, conf_thres, iou_thres, k=k, classes=classes)
+    return cluster_nms(raw_output, conf_thres, iou_thres, k=k, classes=classes,
+                       with_stats=with_stats)
 
 def draw_detections(frame: np.ndarray, dets_cpu: np.ndarray,
                      scale: float, pad: tuple[int, int]) -> np.ndarray:
@@ -248,12 +250,30 @@ def main() -> None:
             context.execute_async_v3(stream.cuda_stream)
         stream.synchronize()
 
-    # --- capture the forward pass as a CUDA graph, once ---
-    print("Capturing CUDA graph...")
+    def run_nms() -> torch.Tensor:
+        """The fixed NMS + its stats as one flat tensor: (k*6 + 3,)."""
+        dets, stats = custom_nms(output_buf, conf_thres=conf, iou_thres=args.iou,
+                                 k=args.nms_candidates, with_stats=True)
+        return torch.cat([dets.flatten(), stats])
+
+    # --- warm the NMS ops up outside the capture (loads their kernels and
+    # sizes the allocator), as PyTorch recommends before capturing ---
+    with torch.cuda.stream(stream):
+        for _ in range(3):
+            run_nms()
+    stream.synchronize()
+
+    # --- capture the forward pass AND the fixed NMS as one CUDA graph, once,
+    # as M15 does (scripts/infer_m15_trt.py): every frame replays the engine
+    # and the NMS with a single call, so the NMS's ~50 small operations are no
+    # longer launched one by one from Python ---
+    print("Capturing CUDA graph (engine + fixed NMS)...")
     graph = torch.cuda.CUDAGraph()
     with torch.cuda.graph(graph, stream=stream):
         context.execute_async_v3(stream.cuda_stream)
-    print("Graph captured. Starting inference loop.")
+        graph_out = run_nms()
+    print("Graph captured (engine + fixed NMS). Starting inference loop.")
+    truncated_frames = unconverged_frames = max_candidates = 0
 
     frames = 0
     timed_frames = 0
@@ -269,14 +289,16 @@ def main() -> None:
                 cpu_staging.copy_(torch.from_numpy(frame))
                 gpu_raw.copy_(cpu_staging, non_blocking=True)
                 preprocess_gpu(gpu_raw, new_hw, pad_lrtb, input_buf)
-                graph.replay()
+                graph.replay()   # the engine and the fixed NMS
                 stream.synchronize()
-                preds = custom_nms(output_buf, conf_thres=conf, iou_thres=args.iou,
-                                   k=args.nms_candidates)
                 # Single GPU->CPU sync of the fixed (MAX_CANDIDATES, 6) tensor
                 # here, inside "inference" - not one sync per op scattered
                 # through draw_detections (see its docstring).
-                preds_cpu = preds.cpu().numpy()
+                flat = graph_out.cpu().numpy()
+                preds_cpu = flat[:-3].reshape(-1, 6)
+                max_candidates = max(max_candidates, int(flat[-3]))
+                truncated_frames += int(flat[-2])
+                unconverged_frames += int(flat[-1])
 
             with nvtx_range("draw"):
                 annotated = draw_detections(frame, preds_cpu, scale, pad_left_top)
@@ -305,6 +327,9 @@ def main() -> None:
         print(f"processed {timed_frames} frames in {dt:.1f}s{note}  ->  {timed_frames / dt:.1f} FPS")
     elif frames:
         print(f"processed {frames} frames, all within the {warmup_frames}-frame warm-up  ->  no timed FPS")
+    print(f"fixed NMS in the graph (k={args.nms_candidates}): most candidates above conf={conf} in a "
+          f"frame: {max_candidates}; {truncated_frames} of {frames} frames filled all k, "
+          f"{unconverged_frames} needed more passes (0 and 0 = identical to standard NMS on every frame)")
 
 
 if __name__ == "__main__":
