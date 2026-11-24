@@ -127,18 +127,18 @@ a box is removed only if a higher-scoring box that is itself kept overlaps it,
 repeated a fixed number of times. This gives exactly the result of standard
 NMS while keeping the shapes fixed. For YOLOv8n's 80 classes, boxes are
 shifted by their class so that boxes of different classes never suppress each
-other, and $k = 300$, Ultralytics' limit on detections per image; both models
-use the baseline's IoU threshold of 0.7. Our first version for YOLOv8n used
-Fast NMS~\cite{bolya2019yolact}, a single matrix step that also lets removed
-boxes suppress others, with $k = 100$; on COCO it cost about four points of
-mAP50, mostly on small objects, which is why both models now use the exact
-rule. In both models the NMS is captured into the same CUDA graph as the
-engine ($k = 100$ for M15), so a frame's network and postprocessing replay with
-one call and issue the same work regardless of the image's content. Each run
-reports whether more than $k$ candidates passed the threshold or the passes
-did not converge, the only cases in which the result could differ from
-standard NMS; in our M15 test runs neither happened.
-% EDIT: add YOLOv8n's numbers once the graph version has run (the scripts print them).
+other, and $k = 300$, Ultralytics' limit on detections per image; for M15,
+$k = 100$. Both models use the baseline's IoU threshold of 0.7. In both, the
+NMS is captured into the same CUDA graph as the engine, so a frame's network
+and postprocessing replay with one call and issue the same work regardless of
+the image's content. Each run reports whether more than $k$ candidates passed
+the threshold or the passes did not converge, the only cases in which the
+result could differ from standard NMS. In the SAR setting a frame contains at
+most a few people, so far fewer than $k$ candidates are expected to pass the
+threshold, and the fixed size does not limit the detections. This makes the
+fixed-shape NMS a good fit for the SAR task: it gives the same detections as
+standard NMS, and its cost does not depend on how many targets a frame
+contains, so the frame time stays predictable when a target appears.
 
 \textbf{FP16.} The last stage builds the engine with 16-bit floating-point
 layers. Ultralytics' FP16 export keeps FP32 input and output tensors, so

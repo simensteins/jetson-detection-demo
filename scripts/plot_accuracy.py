@@ -49,7 +49,8 @@ CONFIG = {
     "m15": dict(name="M15", dataset="SAR test set, 1500 images",
                 csv="data/eval_m15/sar_ir_test/summary.csv", outdir="data/eval_m15/figures",
                 stages=["baseline", "gpupre", "nms", "fp16"], control=None,
-                metrics=[("mAP50", "AP50", BLUE), ("mAP50_95", "AP50-95", ORANGE)]),
+                metrics=[("mAP50", "AP50", BLUE), ("mAP50_95", "AP50-95", ORANGE),
+                         ("mAP_small", "AP small objects", AQUA)]),
 }
 
 
