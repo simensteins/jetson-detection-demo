@@ -1,0 +1,378 @@
+=== YOLOv8n accuracy rerun, 600 images, started 2026-11-24T10:50:09+01:00
+--- git: 0524b03 7 uncommitted file(s)
+
+=== person only (the SAR task)  10:50:09
+loading annotations into memory...
+Done (t=0.93s)
+creating index...
+index created!
+600 images; by labelled objects: 0: 261, 1-3: 217, 4-10: 79, >10: 43
+/home/studenta/nsight-demo/jetson-detection-demo/.venv/lib/python3.12/site-packages/torch/cuda/__init__.py:422: UserWarning: Found GPU0 Orin which is of compute capability (CC) 8.7.
+The following list shows the CCs this version of PyTorch was built for and the hardware CCs it supports:
+- 8.0 which supports hardware CC >=8.0,<9.0 except {8.7}
+- 9.0 which supports hardware CC >=9.0,<10.0
+- 10.0 which supports hardware CC >=10.0,<11.0 except {10.1}
+- 11.0 which supports hardware CC >=11.0,<12.0
+- 12.0 which supports hardware CC >=12.0,<13.0
+No published PyTorch CUDA builds for release 2.13.0+cu130 support this GPU. Visit https://pytorch.org/get-started/locally/ to find a compatible release.
+  _warn_unsupported_code(d, device_cc, code_ccs)
+Loading yolov8n.engine for TensorRT inference...
+[11/24/2026-10:50:14] [TRT] [I] Loaded engine size: 13 MiB
+[11/24/2026-10:50:14] [TRT] [W] Using an engine plan file across different models of devices is not supported and is likely to affect performance or even cause errors or deadlock.
+[11/24/2026-10:50:14] [TRT] [I] [MemUsageChange] TensorRT-managed allocation in IExecutionContext creation: CPU +0, GPU +18, now: CPU 0, GPU 30 (MiB)
+Loading yolov8n_fp16_io.engine for TensorRT inference...
+[11/24/2026-10:50:17] [TRT] [W] WARNING The logger passed into createInferRuntime differs from one already registered for an existing builder, runtime, or refitter. So the current new logger is ignored, and TensorRT will use the existing one which is returned by nvinfer1::getLogger() instead.
+[11/24/2026-10:50:17] [TRT] [I] Loaded engine size: 8 MiB
+[11/24/2026-10:50:17] [TRT] [W] Using an engine plan file across different models of devices is not supported and is likely to affect performance or even cause errors or deadlock.
+[11/24/2026-10:50:17] [TRT] [I] [MemUsageChange] TensorRT-managed allocation in IExecutionContext creation: CPU +1, GPU +9, now: CPU 1, GPU 45 (MiB)
+Loading yolov8n.engine for TensorRT inference...
+[11/24/2026-10:50:17] [TRT] [W] WARNING The logger passed into createInferRuntime differs from one already registered for an existing builder, runtime, or refitter. So the current new logger is ignored, and TensorRT will use the existing one which is returned by nvinfer1::getLogger() instead.
+[11/24/2026-10:50:17] [TRT] [I] Loaded engine size: 13 MiB
+[11/24/2026-10:50:17] [TRT] [W] Using an engine plan file across different models of devices is not supported and is likely to affect performance or even cause errors or deadlock.
+[11/24/2026-10:50:17] [TRT] [I] [MemUsageChange] TensorRT-managed allocation in IExecutionContext creation: CPU +0, GPU +18, now: CPU 1, GPU 75 (MiB)
+  baseline: 500/600
+Loading and preparing results...
+DONE (t=0.37s)
+creating index...
+index created!
+Running per image evaluation...
+Evaluate annotation type *bbox*
+DONE (t=3.29s).
+Accumulating evaluation results...
+DONE (t=0.26s).
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.524
+ Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.763
+ Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.559
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area= small | maxDets=100 ] = 0.303
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ] = 0.589
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = 0.775
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets=  1 ] = 0.195
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets= 10 ] = 0.530
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.647
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area= small | maxDets=100 ] = 0.453
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ] = 0.729
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = 0.846
+  baseline: mAP50-95 52.36  mAP50 76.27  P/R@0.25 74.4/67.7  (24 s)
+  gpupre: 500/600
+Loading and preparing results...
+DONE (t=0.04s)
+creating index...
+index created!
+Running per image evaluation...
+Evaluate annotation type *bbox*
+DONE (t=3.26s).
+Accumulating evaluation results...
+DONE (t=0.25s).
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.524
+ Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.763
+ Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.559
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area= small | maxDets=100 ] = 0.303
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ] = 0.589
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = 0.775
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets=  1 ] = 0.195
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets= 10 ] = 0.530
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.646
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area= small | maxDets=100 ] = 0.453
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ] = 0.729
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = 0.846
+  gpupre: mAP50-95 52.36  mAP50 76.25  P/R@0.25 74.3/67.8  (17 s)
+  customnms: 500/600
+Loading and preparing results...
+DONE (t=0.03s)
+creating index...
+index created!
+Running per image evaluation...
+Evaluate annotation type *bbox*
+DONE (t=3.03s).
+Accumulating evaluation results...
+DONE (t=0.28s).
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.522
+ Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.760
+ Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.558
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area= small | maxDets=100 ] = 0.301
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ] = 0.588
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = 0.775
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets=  1 ] = 0.195
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets= 10 ] = 0.530
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.644
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area= small | maxDets=100 ] = 0.449
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ] = 0.726
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = 0.845
+  customnms: mAP50-95 52.24  mAP50 76.05  P/R@0.25 74.3/67.8  (18 s)
+  fp16: 500/600
+Loading and preparing results...
+DONE (t=0.03s)
+creating index...
+index created!
+Running per image evaluation...
+Evaluate annotation type *bbox*
+DONE (t=3.39s).
+Accumulating evaluation results...
+DONE (t=0.27s).
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.522
+ Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.762
+ Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.560
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area= small | maxDets=100 ] = 0.298
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ] = 0.590
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = 0.774
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets=  1 ] = 0.194
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets= 10 ] = 0.528
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.643
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area= small | maxDets=100 ] = 0.446
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ] = 0.728
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = 0.844
+  fp16: mAP50-95 52.20  mAP50 76.17  P/R@0.25 74.5/67.9  (16 s)
+  fp16_ultranms: 500/600
+Loading and preparing results...
+DONE (t=0.04s)
+creating index...
+index created!
+Running per image evaluation...
+Evaluate annotation type *bbox*
+DONE (t=3.27s).
+Accumulating evaluation results...
+DONE (t=0.25s).
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.523
+ Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.763
+ Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.561
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area= small | maxDets=100 ] = 0.300
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ] = 0.591
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = 0.774
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets=  1 ] = 0.195
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets= 10 ] = 0.528
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.645
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area= small | maxDets=100 ] = 0.450
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ] = 0.730
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = 0.845
+  fp16_ultranms: mAP50-95 52.31  mAP50 76.27  P/R@0.25 74.5/67.9  (13 s)
+
+| Pipeline | mAP50-95 | mAP50 | mAP small | P@0.25 | R@0.25 | F1@0.25 | FP/img@0.25 | baseline dets kept |
+|---|---|---|---|---|---|---|---|---|
+| baseline | 52.36 | 76.27 | 30.27 | 74.4 | 67.7 | 70.9 | 0.53 | – |
+| gpupre | 52.36 | 76.25 | 30.25 | 74.3 | 67.8 | 70.9 | 0.53 | 99.9 % |
+| customnms | 52.24 | 76.05 | 30.11 | 74.3 | 67.8 | 70.9 | 0.53 | 99.9 % |
+| fp16 | 52.20 | 76.17 | 29.85 | 74.5 | 67.9 | 71.1 | 0.52 | 99.7 % |
+| fp16_ultranms | 52.31 | 76.27 | 29.99 | 74.5 | 67.9 | 71.1 | 0.52 | 99.7 % |
+
+| Objects in image | Pipeline | Images | mAP50-95 | mAP50 | P@0.25 | R@0.25 | FP/img@0.25 | baseline dets kept |
+|---|---|---|---|---|---|---|---|---|
+| 0 | baseline | 261 | – | – | 0.0 | – | 0.03 | – |
+| 0 | gpupre | 261 | – | – | 0.0 | – | 0.04 | 100.0 % |
+| 0 | customnms | 261 | – | – | 0.0 | – | 0.04 | 100.0 % |
+| 0 | fp16 | 261 | – | – | 0.0 | – | 0.04 | 100.0 % |
+| 0 | fp16_ultranms | 261 | – | – | 0.0 | – | 0.04 | 100.0 % |
+| 1-3 | baseline | 217 | 67.06 | 85.06 | 82.4 | 81.0 | 0.27 | – |
+| 1-3 | gpupre | 217 | 67.03 | 85.04 | 81.9 | 81.0 | 0.28 | 100.0 % |
+| 1-3 | customnms | 217 | 67.15 | 85.30 | 81.9 | 81.0 | 0.28 | 100.0 % |
+| 1-3 | fp16 | 217 | 67.00 | 85.33 | 81.9 | 81.0 | 0.28 | 100.0 % |
+| 1-3 | fp16_ultranms | 217 | 66.87 | 85.03 | 81.9 | 81.0 | 0.28 | 100.0 % |
+| 4-10 | baseline | 79 | 49.16 | 73.06 | 81.9 | 65.8 | 0.87 | – |
+| 4-10 | gpupre | 79 | 49.16 | 73.03 | 82.2 | 66.0 | 0.86 | 99.7 % |
+| 4-10 | customnms | 79 | 49.18 | 73.04 | 82.2 | 66.0 | 0.86 | 99.7 % |
+| 4-10 | fp16 | 79 | 49.22 | 73.37 | 82.7 | 66.7 | 0.84 | 99.7 % |
+| 4-10 | fp16_ultranms | 79 | 49.19 | 73.36 | 82.7 | 66.7 | 0.84 | 99.7 % |
+| >10 | baseline | 43 | 46.92 | 75.44 | 65.0 | 61.1 | 4.16 | – |
+| >10 | gpupre | 43 | 46.88 | 75.41 | 64.8 | 61.1 | 4.19 | 100.0 % |
+| >10 | customnms | 43 | 46.57 | 75.03 | 64.8 | 61.1 | 4.19 | 100.0 % |
+| >10 | fp16 | 43 | 46.48 | 74.77 | 65.0 | 61.0 | 4.14 | 99.4 % |
+| >10 | fp16_ultranms | 43 | 46.85 | 75.40 | 65.0 | 61.0 | 4.14 | 99.4 % |
+
+wrote reports/eval/yolo_coco_person_summary.csv/.md and yolo_coco_person_buckets.csv/.md
+
+=== all 80 classes  10:52:05
+loading annotations into memory...
+Done (t=0.68s)
+creating index...
+index created!
+600 images; by labelled objects: 0: 6, 1-3: 236, 4-10: 217, >10: 141
+/home/studenta/nsight-demo/jetson-detection-demo/.venv/lib/python3.12/site-packages/torch/cuda/__init__.py:422: UserWarning: Found GPU0 Orin which is of compute capability (CC) 8.7.
+The following list shows the CCs this version of PyTorch was built for and the hardware CCs it supports:
+- 8.0 which supports hardware CC >=8.0,<9.0 except {8.7}
+- 9.0 which supports hardware CC >=9.0,<10.0
+- 10.0 which supports hardware CC >=10.0,<11.0 except {10.1}
+- 11.0 which supports hardware CC >=11.0,<12.0
+- 12.0 which supports hardware CC >=12.0,<13.0
+No published PyTorch CUDA builds for release 2.13.0+cu130 support this GPU. Visit https://pytorch.org/get-started/locally/ to find a compatible release.
+  _warn_unsupported_code(d, device_cc, code_ccs)
+Loading yolov8n.engine for TensorRT inference...
+[11/24/2026-10:52:10] [TRT] [I] Loaded engine size: 13 MiB
+[11/24/2026-10:52:10] [TRT] [W] Using an engine plan file across different models of devices is not supported and is likely to affect performance or even cause errors or deadlock.
+[11/24/2026-10:52:10] [TRT] [I] [MemUsageChange] TensorRT-managed allocation in IExecutionContext creation: CPU +0, GPU +18, now: CPU 0, GPU 30 (MiB)
+Loading yolov8n_fp16_io.engine for TensorRT inference...
+[11/24/2026-10:52:13] [TRT] [W] WARNING The logger passed into createInferRuntime differs from one already registered for an existing builder, runtime, or refitter. So the current new logger is ignored, and TensorRT will use the existing one which is returned by nvinfer1::getLogger() instead.
+[11/24/2026-10:52:13] [TRT] [I] Loaded engine size: 8 MiB
+[11/24/2026-10:52:13] [TRT] [W] Using an engine plan file across different models of devices is not supported and is likely to affect performance or even cause errors or deadlock.
+[11/24/2026-10:52:13] [TRT] [I] [MemUsageChange] TensorRT-managed allocation in IExecutionContext creation: CPU +1, GPU +9, now: CPU 1, GPU 45 (MiB)
+Loading yolov8n.engine for TensorRT inference...
+[11/24/2026-10:52:13] [TRT] [W] WARNING The logger passed into createInferRuntime differs from one already registered for an existing builder, runtime, or refitter. So the current new logger is ignored, and TensorRT will use the existing one which is returned by nvinfer1::getLogger() instead.
+[11/24/2026-10:52:13] [TRT] [I] Loaded engine size: 13 MiB
+[11/24/2026-10:52:13] [TRT] [W] Using an engine plan file across different models of devices is not supported and is likely to affect performance or even cause errors or deadlock.
+[11/24/2026-10:52:13] [TRT] [I] [MemUsageChange] TensorRT-managed allocation in IExecutionContext creation: CPU +0, GPU +18, now: CPU 1, GPU 75 (MiB)
+  baseline: 500/600
+Loading and preparing results...
+DONE (t=0.52s)
+creating index...
+index created!
+Running per image evaluation...
+Evaluate annotation type *bbox*
+DONE (t=10.88s).
+Accumulating evaluation results...
+DONE (t=2.32s).
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.390
+ Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.536
+ Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.425
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area= small | maxDets=100 ] = 0.193
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ] = 0.421
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = 0.540
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets=  1 ] = 0.318
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets= 10 ] = 0.535
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.580
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area= small | maxDets=100 ] = 0.335
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ] = 0.644
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = 0.727
+  baseline: mAP50-95 39.03  mAP50 53.62  P/R@0.25 67.1/51.0  (30 s)
+  gpupre: 500/600
+Loading and preparing results...
+DONE (t=0.62s)
+creating index...
+index created!
+Running per image evaluation...
+Evaluate annotation type *bbox*
+DONE (t=10.82s).
+Accumulating evaluation results...
+DONE (t=2.32s).
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.390
+ Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.537
+ Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.425
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area= small | maxDets=100 ] = 0.194
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ] = 0.421
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = 0.540
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets=  1 ] = 0.318
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets= 10 ] = 0.535
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.580
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area= small | maxDets=100 ] = 0.336
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ] = 0.644
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = 0.726
+  gpupre: mAP50-95 39.04  mAP50 53.65  P/R@0.25 67.1/51.0  (28 s)
+  customnms: 500/600
+Loading and preparing results...
+DONE (t=0.54s)
+creating index...
+index created!
+Running per image evaluation...
+Evaluate annotation type *bbox*
+DONE (t=6.86s).
+Accumulating evaluation results...
+DONE (t=1.76s).
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.388
+ Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.531
+ Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.422
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area= small | maxDets=100 ] = 0.190
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ] = 0.418
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = 0.538
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets=  1 ] = 0.315
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets= 10 ] = 0.519
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.546
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area= small | maxDets=100 ] = 0.289
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ] = 0.608
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = 0.705
+  customnms: mAP50-95 38.75  mAP50 53.09  P/R@0.25 67.1/51.0  (24 s)
+  fp16: 500/600
+Loading and preparing results...
+DONE (t=0.09s)
+creating index...
+index created!
+Running per image evaluation...
+Evaluate annotation type *bbox*
+DONE (t=7.22s).
+Accumulating evaluation results...
+DONE (t=1.76s).
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.388
+ Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.530
+ Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.422
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area= small | maxDets=100 ] = 0.192
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ] = 0.419
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = 0.538
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets=  1 ] = 0.315
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets= 10 ] = 0.519
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.547
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area= small | maxDets=100 ] = 0.292
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ] = 0.607
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = 0.705
+  fp16: mAP50-95 38.76  mAP50 53.03  P/R@0.25 67.2/51.0  (22 s)
+  fp16_ultranms: 500/600
+Loading and preparing results...
+DONE (t=0.61s)
+creating index...
+index created!
+Running per image evaluation...
+Evaluate annotation type *bbox*
+DONE (t=10.90s).
+Accumulating evaluation results...
+DONE (t=2.33s).
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.390
+ Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.536
+ Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.424
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area= small | maxDets=100 ] = 0.195
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ] = 0.422
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = 0.540
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets=  1 ] = 0.318
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets= 10 ] = 0.536
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.580
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area= small | maxDets=100 ] = 0.339
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ] = 0.643
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = 0.726
+  fp16_ultranms: mAP50-95 39.05  mAP50 53.62  P/R@0.25 67.2/51.0  (25 s)
+
+| Pipeline | mAP50-95 | mAP50 | mAP small | P@0.25 | R@0.25 | F1@0.25 | FP/img@0.25 | baseline dets kept |
+|---|---|---|---|---|---|---|---|---|
+| baseline | 39.03 | 53.62 | 19.33 | 67.1 | 51.0 | 57.9 | 1.81 | – |
+| gpupre | 39.04 | 53.65 | 19.35 | 67.1 | 51.0 | 57.9 | 1.81 | 99.9 % |
+| customnms | 38.75 | 53.09 | 19.01 | 67.1 | 51.0 | 57.9 | 1.81 | 99.9 % |
+| fp16 | 38.76 | 53.03 | 19.19 | 67.2 | 51.0 | 58.0 | 1.80 | 99.5 % |
+| fp16_ultranms | 39.05 | 53.62 | 19.53 | 67.2 | 51.0 | 58.0 | 1.80 | 99.5 % |
+
+| Objects in image | Pipeline | Images | mAP50-95 | mAP50 | P@0.25 | R@0.25 | FP/img@0.25 | baseline dets kept |
+|---|---|---|---|---|---|---|---|---|
+| 0 | baseline | 6 | – | – | 0.0 | – | 0.50 | – |
+| 0 | gpupre | 6 | – | – | 0.0 | – | 0.50 | 100.0 % |
+| 0 | customnms | 6 | – | – | 0.0 | – | 0.50 | 100.0 % |
+| 0 | fp16 | 6 | – | – | 0.0 | – | 0.50 | 100.0 % |
+| 0 | fp16_ultranms | 6 | – | – | 0.0 | – | 0.50 | 100.0 % |
+| 1-3 | baseline | 236 | 50.95 | 64.60 | 68.1 | 75.0 | 0.73 | – |
+| 1-3 | gpupre | 236 | 50.90 | 64.56 | 68.1 | 75.0 | 0.73 | 99.8 % |
+| 1-3 | customnms | 236 | 50.91 | 64.56 | 68.1 | 75.0 | 0.73 | 99.8 % |
+| 1-3 | fp16 | 236 | 50.72 | 64.50 | 67.8 | 74.8 | 0.74 | 99.6 % |
+| 1-3 | fp16_ultranms | 236 | 50.72 | 64.50 | 67.8 | 74.8 | 0.74 | 99.6 % |
+| 4-10 | baseline | 217 | 44.90 | 59.66 | 69.4 | 55.6 | 1.50 | – |
+| 4-10 | gpupre | 217 | 44.88 | 59.64 | 69.3 | 55.6 | 1.50 | 99.9 % |
+| 4-10 | customnms | 217 | 44.87 | 59.59 | 69.3 | 55.6 | 1.50 | 99.9 % |
+| 4-10 | fp16 | 217 | 44.77 | 59.68 | 70.0 | 55.8 | 1.46 | 99.2 % |
+| 4-10 | fp16_ultranms | 217 | 44.79 | 59.74 | 70.0 | 55.8 | 1.46 | 99.2 % |
+| >10 | baseline | 141 | 34.07 | 48.79 | 65.5 | 43.9 | 4.14 | – |
+| >10 | gpupre | 141 | 34.08 | 48.84 | 65.6 | 43.9 | 4.14 | 99.9 % |
+| >10 | customnms | 141 | 33.28 | 47.26 | 65.6 | 43.9 | 4.14 | 99.9 % |
+| >10 | fp16 | 141 | 33.20 | 47.01 | 65.5 | 43.8 | 4.15 | 99.5 % |
+| >10 | fp16_ultranms | 141 | 34.02 | 48.76 | 65.5 | 43.8 | 4.15 | 99.5 % |
+
+wrote reports/eval/yolo_coco_summary.csv/.md and yolo_coco_buckets.csv/.md
+
+=== finished 2026-11-24T10:55:26+01:00
+
+--- reports/eval/yolo_coco_person_summary.md
+| Pipeline | mAP50-95 | mAP50 | mAP small | P@0.25 | R@0.25 | F1@0.25 | FP/img@0.25 | baseline dets kept |
+|---|---|---|---|---|---|---|---|---|
+| baseline | 52.36 | 76.27 | 30.27 | 74.4 | 67.7 | 70.9 | 0.53 | – |
+| gpupre | 52.36 | 76.25 | 30.25 | 74.3 | 67.8 | 70.9 | 0.53 | 99.9 % |
+| customnms | 52.24 | 76.05 | 30.11 | 74.3 | 67.8 | 70.9 | 0.53 | 99.9 % |
+| fp16 | 52.20 | 76.17 | 29.85 | 74.5 | 67.9 | 71.1 | 0.52 | 99.7 % |
+| fp16_ultranms | 52.31 | 76.27 | 29.99 | 74.5 | 67.9 | 71.1 | 0.52 | 99.7 % |
+
+--- reports/eval/yolo_coco_summary.md
+| Pipeline | mAP50-95 | mAP50 | mAP small | P@0.25 | R@0.25 | F1@0.25 | FP/img@0.25 | baseline dets kept |
+|---|---|---|---|---|---|---|---|---|
+| baseline | 39.03 | 53.62 | 19.33 | 67.1 | 51.0 | 57.9 | 1.81 | – |
+| gpupre | 39.04 | 53.65 | 19.35 | 67.1 | 51.0 | 57.9 | 1.81 | 99.9 % |
+| customnms | 38.75 | 53.09 | 19.01 | 67.1 | 51.0 | 57.9 | 1.81 | 99.9 % |
+| fp16 | 38.76 | 53.03 | 19.19 | 67.2 | 51.0 | 58.0 | 1.80 | 99.5 % |
+| fp16_ultranms | 39.05 | 53.62 | 19.53 | 67.2 | 51.0 | 58.0 | 1.80 | 99.5 % |

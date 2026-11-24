@@ -2,8 +2,9 @@
 """Detection accuracy per optimization stage, one figure per model: one line
 per AP metric across the stages, with the share of the baseline's detections
 each stage reproduces written under its name. A control pipeline that is not
-a stage (YOLOv8n's FP16 engine with the standard NMS) is drawn as unconnected
-hollow markers. The y-axis starts at zero, so small changes are not inflated.
+a stage can be drawn as unconnected hollow markers (CONFIG "control"); none is
+shown now: YOLOv8n's fp16_ultranms (FP16 engine with the standard NMS) only
+mattered while the fixed NMS was approximate, and stays in the CSVs. The y-axis starts at zero, so small changes are not inflated.
 
 Inputs are the summary CSVs the evaluations write (one row per pipeline):
   YOLOv8n  reports/eval/yolo_coco_summary.csv (scripts/eval_yolo_coco.py, COCO val2017)
@@ -12,6 +13,7 @@ Inputs are the summary CSVs the evaluations write (one row per pipeline):
 
 Usage (from the repo root, any Python with matplotlib):
     python3 scripts/plot_accuracy.py --model yolo
+    python3 scripts/plot_accuracy.py --model yolo_person   # reports/eval/yolo_coco_person_summary.csv
     python3 scripts/plot_accuracy.py --model m15
 Writes <outdir>/accuracy_<model>.png/.pdf.
 """
@@ -34,10 +36,16 @@ STAGE_LABELS = {"baseline": "Baseline", "gpupre": "+ GPU\npreproc.", "customnms"
 CONFIG = {
     "yolo": dict(name="YOLOv8n", dataset="COCO val2017, 600 images",
                  csv="reports/eval/yolo_coco_summary.csv", outdir="reports/figures/eval",
-                 stages=["baseline", "gpupre", "customnms", "fp16", "fp16_ultranms"],
-                 control="fp16_ultranms",   # not a stage: isolates FP16's own effect
+                 stages=["baseline", "gpupre", "customnms", "fp16"],
+                 control=None,
                  metrics=[("mAP50", "mAP50", BLUE), ("mAP50_95", "mAP50-95", ORANGE),
                           ("mAP_small", "mAP small objects", AQUA)]),
+    "yolo_person": dict(name="YOLOv8n, person only", dataset="COCO val2017, 600 images",
+                        csv="reports/eval/yolo_coco_person_summary.csv", outdir="reports/figures/eval",
+                        stages=["baseline", "gpupre", "customnms", "fp16"],
+                        control=None,
+                        metrics=[("mAP50", "AP50", BLUE), ("mAP50_95", "AP50-95", ORANGE),
+                                 ("mAP_small", "AP small objects", AQUA)]),
     "m15": dict(name="M15", dataset="SAR test set, 1500 images",
                 csv="data/eval_m15/sar_ir_test/summary.csv", outdir="data/eval_m15/figures",
                 stages=["baseline", "gpupre", "nms", "fp16"], control=None,
