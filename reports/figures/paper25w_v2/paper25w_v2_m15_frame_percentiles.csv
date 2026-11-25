@@ -1,0 +1,6 @@
+stage,report,frames,mean_ms,p50_ms,p95_ms,p99_ms,p99_minus_p50_ms
+Baseline,reports/nsys_paper_reports/paper25w_m15_baseline.sqlite,550,52.43,51.64,54.2,61.29,9.65
++ CUDA graph,reports/nsys_paper_reports/paper25w_m15_graph.sqlite,550,50.93,50.18,52.02,59.96,9.78
++ GPU preproc.,reports/nsys_paper_reports/paper25w_m15_gpupre.sqlite,550,49.59,48.85,51.2,58.38,9.53
++ Fixed NMS,reports/nsys_paper_reports/paper25w_v2_m15_nms.sqlite,550,49.34,49.26,49.84,50.46,1.19
++ FP16,reports/nsys_paper_reports/paper25w_v2_m15_fp16.sqlite,550,24.44,24.41,24.66,25.88,1.47
