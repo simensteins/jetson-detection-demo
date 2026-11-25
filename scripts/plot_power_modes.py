@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """FPS of every stage in every power mode, from scripts/run_power_modes.sh:
-one figure per model, with the runs without a profiler and the runs under
-nsys side by side, so the profiler's overhead shows as the drop from the left
-panel to the right.
+one figure per model, grouped by power mode. Each group holds the five stages
+side by side (light to dark: baseline to + FP16), so every iteration can be
+compared within one power mode, and the groups (15 W, 25 W, MAXN SUPER) show
+what the power budget adds.
 
-Both panels share one FPS axis, with a dotted target line (default 30 FPS).
-Per stage there is one bar per power mode (light to dark: 15 W, 25 W, MAXN
-SUPER); the bar is the median over the rounds. Bars of cells with at least one
-throttled run (over-current counters increased) are hatched.
+Only one profiler setting per figure: the runs without a profiler by default
+(--profiler plain), or the runs under nsys (--profiler nsys). Each bar is the
+median over the rounds, labelled with its FPS; a dotted line marks the target
+(default 30 FPS). Bars of cells with at least one throttled run (over-current
+counters increased) are hatched.
 
 If reports/<set>/breakdown.csv exists (scripts/summarize_power_modes.py, run
 on the Jetson), it also draws where the time goes: per model, for each stage
@@ -21,7 +23,8 @@ Usage (from the repo root, after copying reports/<set>/ from the Jetson; any
 Python with matplotlib):
     python3 scripts/plot_power_modes.py --set modes_v2
     python3 scripts/plot_power_modes.py --set modes_v2 --target 30 --outdir reports/figures/modes_v2
-Writes <outdir>/<set>_<model>_fps.png/.pdf and, with breakdown.csv,
+    python3 scripts/plot_power_modes.py --set modes_v2 --profiler nsys   # the runs under nsys
+Writes <outdir>/<set>_<model>_fps.png/.pdf (or _fps_nsys with --profiler nsys) and, with breakdown.csv,
 <set>_<model>_breakdown.png/.pdf, one per model.
 """
 from __future__ import annotations
@@ -46,7 +49,11 @@ LABELS = {"baseline": "Baseline", "graph": "+ CUDA\ngraph", "gpupre": "+ GPU\npr
           "nms": "+ Fixed\nNMS", "fp16": "+ FP16"}
 MODE_ORDER = ["15W", "25W", "MAXN_SUPER"]   # increasing power budget; others go last
 MODE_LABELS = {"MAXN_SUPER": "MAXN SUPER", "15W": "15 W", "25W": "25 W"}
-TITLES = {"plain": "Without profiler", "nsys": "Under Nsight Systems"}
+TITLES = {"plain": "without profiler", "nsys": "under Nsight Systems"}
+# One shade per stage, light to dark in pipeline order (the 4-step ORD_RAMP of
+# plot_paper_figures.py with one lighter step in front, same hue).
+STAGE_COLORS = ["#b9d5f6", "#86b6ef", "#5598e7", "#2a78d6", "#1c5cab"]
+FS_TICK, FS_LABEL, FS_LEGEND = 12, 13, 11   # FPS figure text sizes (pt)
 HATCH = "////"
 MODE_SHORT = {"15W": "15 W", "25W": "25 W", "MAXN_SUPER": "MAXN"}
 SEGMENTS = [   # as plot_compare_reports.plot_time_breakdown
@@ -116,45 +123,47 @@ def load(path: Path) -> dict[tuple[str, str, str], list[dict]]:
     return cells
 
 
-def plot(cells, modes, model, target, set_name, outdir) -> None:
-    profilers = [p for p in ("plain", "nsys") if any(p_ == p for _, _, p_ in cells)]
-    colors = ramp(len(modes))
-    width = 0.8 / len(modes)
-    top = max(float(r["fps"]) for (_, s, _), runs in cells.items() if s.startswith(model + "_")
-              for r in runs)
-    fig, axes = plt.subplots(1, len(profilers), figsize=(7.0, 3.4), sharey=True)
-    axes = list(axes) if len(profilers) > 1 else [axes]
-    throttled_any = False
-    for ax, profiler in zip(axes, profilers):
-        for j, (mode, color) in enumerate(zip(modes, colors)):
-            for i, stage in enumerate(STAGES):
-                runs = cells.get((mode, f"{model}_{stage}", profiler))
-                if not runs:
-                    continue
-                med = statistics.median(float(r["fps"]) for r in runs)
-                x = i + (j - (len(modes) - 1) / 2) * width
-                throttled = any(r["throttled"] == "1" for r in runs)
-                throttled_any |= throttled
-                ax.bar(x, med, width=width * 0.92, color=color, zorder=3, edgecolor="white",
-                       linewidth=0.5, hatch=HATCH if throttled else None)
-        ax.axhline(target, color="black", linestyle=":", linewidth=1.0, zorder=5)
-        ax.set_xticks(range(len(STAGES)))
-        ax.set_xticklabels([LABELS[s] for s in STAGES], fontsize=7.5)
-        style_axes(ax, "Throughput (FPS)" if ax is axes[0] else "")
-        if ax is not axes[0]:   # one y-axis per figure: the panels share it
-            ax.spines["left"].set_visible(False)
-            ax.tick_params(axis="y", left=False)
-        ax.set_ylim(0, max(top, target) * 1.08)
-        ax.set_title(TITLES[profiler], fontsize=10)
-    handles = [Patch(facecolor=c, label=MODE_LABELS.get(m, m)) for m, c in zip(modes, colors)]
+def plot(cells, modes, model, target, set_name, outdir, profiler="plain") -> None:
+    """One group per power mode, one bar per stage inside it."""
+    present = [m for m in modes if any((m, f"{model}_{st}", profiler) in cells for st in STAGES)]
+    if not present:
+        return
+    width = 0.8 / len(STAGES)
+    fig, ax = plt.subplots(figsize=(7.0, 3.6))
+    top, throttled_any = 0.0, False
+    for i, mode in enumerate(present):
+        for j, (stage, color) in enumerate(zip(STAGES, STAGE_COLORS)):
+            runs = cells.get((mode, f"{model}_{stage}", profiler))
+            if not runs:
+                continue
+            med = statistics.median(float(r["fps"]) for r in runs)
+            x = i + (j - (len(STAGES) - 1) / 2) * width
+            throttled = any(r["throttled"] == "1" for r in runs)
+            throttled_any |= throttled
+            ax.bar(x, med, width=width * 0.92, color=color, zorder=3, edgecolor="white",
+                   linewidth=0.5, hatch=HATCH if throttled else None)
+            top = max(top, med)
+    ax.axhline(target, color="black", linestyle=":", linewidth=1.0, zorder=5)
+    ax.set_xticks(range(len(present)))
+    ax.set_xticklabels([MODE_LABELS.get(m, m) for m in present])
+    ax.tick_params(axis="x", length=0)
+    style_axes(ax, "Throughput (FPS)")
+    for spine in ("left", "bottom"):   # black axes, ticks and labels (style_axes makes them grey)
+        ax.spines[spine].set_color("black")
+    ax.tick_params(colors="black", labelsize=FS_TICK)
+    ax.set_ylabel("Throughput (FPS)", fontsize=FS_LABEL)
+    ax.set_xlabel("Power mode", fontsize=FS_LABEL)
+    ax.set_ylim(0, max(top, target) * 1.05)
+    handles = [Patch(facecolor=c, label=LABELS[st].replace("\n", " "))
+               for st, c in zip(STAGES, STAGE_COLORS)]
     if throttled_any:
         handles.append(Patch(facecolor="white", edgecolor=MUTED, hatch=HATCH, label="throttled"))
     handles.append(Line2D([], [], color="black", linestyle=":", linewidth=1.0,
                           label=f"{target:g} FPS target"))
-    fig.legend(handles=handles, frameon=False, fontsize=8, ncol=len(handles), loc="lower center")
-    fig.suptitle(f"{MODELS[model]}: throughput per stage and power mode", fontsize=10)
-    fig.tight_layout(rect=(0, 0.07, 1, 1))
-    save(fig, outdir, f"{set_name}_{model}_fps")
+    fig.legend(handles=handles, frameon=False, fontsize=FS_LEGEND, ncol=4, loc="lower center",
+               columnspacing=1.2, handletextpad=0.5)
+    fig.tight_layout(rect=(0, 0.17, 1, 1))
+    save(fig, outdir, f"{set_name}_{model}_fps" + ("" if profiler == "plain" else f"_{profiler}"))
 
 
 def main() -> None:
@@ -163,6 +172,8 @@ def main() -> None:
     p.add_argument("--dir", default=None, help="Default: reports/<set>")
     p.add_argument("--outdir", default=None, help="Default: reports/figures/<set>")
     p.add_argument("--target", type=float, default=30.0, help="FPS target line")
+    p.add_argument("--profiler", default="plain", choices=["plain", "nsys"],
+                   help="Which runs to plot: plain = without a profiler (default), nsys = under nsys")
     args = p.parse_args()
     src = Path(args.dir or f"reports/{args.set}")
     outdir = Path(args.outdir or f"reports/figures/{args.set}")
@@ -172,7 +183,7 @@ def main() -> None:
     modes = [m for m in MODE_ORDER if m in present] + sorted(present - set(MODE_ORDER))
     for model in MODELS:
         if any(s.startswith(model + "_") for _, s, _ in cells):
-            plot(cells, modes, model, args.target, args.set, outdir)
+            plot(cells, modes, model, args.target, args.set, outdir, args.profiler)
             if (src / "breakdown.csv").exists():
                 plot_breakdown(src / "breakdown.csv", modes, model, args.set, outdir)
 
