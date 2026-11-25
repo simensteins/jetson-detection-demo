@@ -24,7 +24,12 @@ Python with matplotlib):
     python3 scripts/plot_power_modes.py --set modes_v2
     python3 scripts/plot_power_modes.py --set modes_v2 --target 30 --outdir reports/figures/modes_v2
     python3 scripts/plot_power_modes.py --set modes_v2 --profiler nsys   # the runs under nsys
-Writes <outdir>/<set>_<model>_fps.png/.pdf (or _fps_nsys with --profiler nsys) and, with breakdown.csv,
+It also draws the profiler's overhead: frame time under nsys minus frame time
+without a profiler, in ms per frame (a fixed cost per frame reads the same at
+any frame rate, which a difference in FPS does not), grouped the same way.
+
+Writes <outdir>/<set>_<model>_fps.png/.pdf (or _fps_nsys with --profiler nsys),
+<set>_<model>_profiler_overhead.png/.pdf when both settings were run, and, with breakdown.csv,
 <set>_<model>_breakdown.png/.pdf, one per model.
 """
 from __future__ import annotations
@@ -166,6 +171,57 @@ def plot(cells, modes, model, target, set_name, outdir, profiler="plain") -> Non
     save(fig, outdir, f"{set_name}_{model}_fps" + ("" if profiler == "plain" else f"_{profiler}"))
 
 
+def plot_overhead(cells, modes, model, set_name, outdir) -> None:
+    """Profiler overhead per stage and power mode: frame time under nsys minus
+    frame time without a profiler (ms per frame), grouped like plot(). The bar
+    uses the medians over the rounds (1000/median FPS). Hatched when a run on
+    either side throttled."""
+    present = [m for m in modes if any((m, f"{model}_{st}", p) in cells
+                                       for st in STAGES for p in ("plain", "nsys"))]
+    width = 0.8 / len(STAGES)
+    fig, ax = plt.subplots(figsize=(7.0, 3.6))
+    lo, hi, throttled_any, drawn = 0.0, 0.0, False, False
+    for i, mode in enumerate(present):
+        for j, (stage, color) in enumerate(zip(STAGES, STAGE_COLORS)):
+            plain = cells.get((mode, f"{model}_{stage}", "plain"))
+            nsys = cells.get((mode, f"{model}_{stage}", "nsys"))
+            if not plain or not nsys:
+                continue
+            ms = lambda runs: 1000.0 / statistics.median(float(r["fps"]) for r in runs)  # noqa: E731
+            diff = ms(nsys) - ms(plain)
+            x = i + (j - (len(STAGES) - 1) / 2) * width
+            throttled = any(r["throttled"] == "1" for r in plain + nsys)
+            throttled_any |= throttled
+            ax.bar(x, diff, width=width * 0.92, color=color, zorder=3, edgecolor="white",
+                   linewidth=0.5, hatch=HATCH if throttled else None)
+            lo, hi = min(lo, diff), max(hi, diff)
+            drawn = True
+    if not drawn:
+        plt.close(fig)
+        return
+    ax.set_xticks(range(len(present)))
+    ax.set_xticklabels([MODE_LABELS.get(m, m) for m in present])
+    ax.tick_params(axis="x", length=0)
+    style_axes(ax, "")
+    for spine in ("left", "bottom"):
+        ax.spines[spine].set_color("black")
+    ax.tick_params(colors="black", labelsize=FS_TICK)
+    ax.set_ylabel("Profiler overhead (ms/frame)", fontsize=FS_LABEL)
+    ax.set_xlabel("Power mode", fontsize=FS_LABEL)
+    span = hi - lo
+    ax.set_ylim(0.0 if lo >= 0 else lo - 0.05 * span, hi + 0.08 * span)
+    if lo < 0:   # a stage ran faster under nsys than without it: mark the zero line
+        ax.axhline(0, color="black", linewidth=0.8, zorder=4)
+    handles = [Patch(facecolor=c, label=LABELS[st].replace("\n", " "))
+               for st, c in zip(STAGES, STAGE_COLORS)]
+    if throttled_any:
+        handles.append(Patch(facecolor="white", edgecolor=MUTED, hatch=HATCH, label="throttled"))
+    fig.legend(handles=handles, frameon=False, fontsize=FS_LEGEND, ncol=4, loc="lower center",
+               columnspacing=1.2, handletextpad=0.5)
+    fig.tight_layout(rect=(0, 0.17, 1, 1))
+    save(fig, outdir, f"{set_name}_{model}_profiler_overhead")
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description="FPS per stage and power mode, with and without nsys")
     p.add_argument("--set", default="modes_v2")
@@ -184,6 +240,7 @@ def main() -> None:
     for model in MODELS:
         if any(s.startswith(model + "_") for _, s, _ in cells):
             plot(cells, modes, model, args.target, args.set, outdir, args.profiler)
+            plot_overhead(cells, modes, model, args.set, outdir)
             if (src / "breakdown.csv").exists():
                 plot_breakdown(src / "breakdown.csv", modes, model, args.set, outdir)
 
