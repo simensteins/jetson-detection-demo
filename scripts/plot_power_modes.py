@@ -59,6 +59,9 @@ TITLES = {"plain": "without profiler", "nsys": "under Nsight Systems"}
 # plot_paper_figures.py with one lighter step in front, same hue).
 STAGE_COLORS = ["#b9d5f6", "#86b6ef", "#5598e7", "#2a78d6", "#1c5cab"]
 FS_TICK, FS_LABEL, FS_LEGEND = 12, 13, 11   # FPS figure text sizes (pt)
+FS_BAR = 10   # stage names under the bars of the breakdown figure
+SHORT_STAGE = {"baseline": "Base", "graph": "Graph", "gpupre": "GPU pre",
+               "nms": "NMS", "fp16": "FP16"}
 HATCH = "////"
 MODE_SHORT = {"15W": "15 W", "25W": "25 W", "MAXN_SUPER": "MAXN"}
 SEGMENTS = [   # as plot_compare_reports.plot_time_breakdown
@@ -70,6 +73,11 @@ SEGMENTS = [   # as plot_compare_reports.plot_time_breakdown
 
 
 def plot_breakdown(path: Path, modes, model, set_name, outdir) -> None:
+    """Where the time goes: per power mode a group of five stacked bars, one
+    per stage (baseline to + FP16), split into the parts of the `inference`
+    range; means per frame, median over the rounds, runs under nsys. Same
+    layout and style as plot(): no title, black axes, the stage under each bar
+    and the power mode under each group."""
     rows = [r for r in csv.DictReader(open(path)) if r["stage"].startswith(model + "_")]
     if not rows:
         return
@@ -79,38 +87,42 @@ def plot_breakdown(path: Path, modes, model, set_name, outdir) -> None:
     med = {k: {key: statistics.median(float(r[key]) for r in v) for key, *_ in SEGMENTS}
            for k, v in cell.items()}
     present = [m for m in modes if any((m, s) in med for s in STAGES)]
-    width = 0.8 / len(present)
-    fig, ax = plt.subplots(figsize=(7.0, 3.6))
-    top, ticks, tick_labels = 0.0, [], []
-    for i, stage in enumerate(STAGES):
-        for j, mode in enumerate(present):
+    width = 0.8 / len(STAGES)
+    fig, ax = plt.subplots(figsize=(7.0, 3.8))
+    top, ticks, tick_labels, first = 0.0, [], [], True
+    for i, mode in enumerate(present):
+        for j, stage in enumerate(STAGES):
             vals = med.get((mode, stage))
             if not vals:
                 continue
-            x = i + (j - (len(present) - 1) / 2) * width
+            x = i + (j - (len(STAGES) - 1) / 2) * width
             bottom = 0.0
             for key, label, color, hatch in SEGMENTS:
                 ax.bar(x, vals[key], width * 0.9, bottom=bottom, color=color, hatch=hatch,
                        edgecolor="white", linewidth=0.5, zorder=3,
-                       label=label if (i, j) == (0, 0) else None)
+                       label=label if first else None)
                 bottom += vals[key]
+            first = False
             top = max(top, bottom)
             ticks.append(x)
-            tick_labels.append(MODE_SHORT.get(mode, mode))
-    style_axes(ax, "Time per inference (ms)")
-    ax.set_xticks(ticks)   # first row: the power mode under each bar
-    ax.set_xticklabels(tick_labels, fontsize=6.5)
+            tick_labels.append(SHORT_STAGE[stage])
+    style_axes(ax, "")
+    for spine in ("left", "bottom"):   # black axes, ticks and labels (style_axes makes them grey)
+        ax.spines[spine].set_color("black")
+    ax.tick_params(colors="black", labelsize=FS_TICK)
+    ax.set_ylabel("Time per inference (ms)", fontsize=FS_LABEL)
+    ax.set_xticks(ticks)   # first row: the stage under each bar
+    ax.set_xticklabels(tick_labels, fontsize=FS_BAR, rotation=90)
     ax.tick_params(axis="x", length=0, pad=3)
-    stages_axis = ax.secondary_xaxis(-0.09)   # second row: the stage under each group
-    stages_axis.set_xticks(range(len(STAGES)))
-    stages_axis.set_xticklabels([LABELS[s].replace("\n", " ") for s in STAGES], fontsize=8)
-    stages_axis.tick_params(axis="x", length=0, colors="black")
-    stages_axis.spines["bottom"].set_visible(False)
-    ax.set_ylim(0, top * 1.08)
-    ax.set_title(f"{MODELS[model]}: inference time per stage and power mode, by component",
-                 fontsize=10)
-    fig.legend(frameon=False, fontsize=7.5, ncol=2, loc="lower center")
-    fig.tight_layout(rect=(0, 0.11, 1, 1))
+    modes_axis = ax.secondary_xaxis("bottom")   # second row: the power mode under each group
+    modes_axis.set_xticks(range(len(present)))
+    modes_axis.set_xticklabels([MODE_LABELS.get(m, m) for m in present], fontsize=FS_LABEL)
+    modes_axis.tick_params(axis="x", length=0, pad=62, colors="black")
+    modes_axis.spines["bottom"].set_visible(False)
+    ax.set_ylim(0, top * 1.05)
+    fig.legend(frameon=False, fontsize=FS_LEGEND, ncol=2, loc="lower center",
+               columnspacing=1.2, handletextpad=0.5)
+    fig.tight_layout(rect=(0, 0.13, 1, 1))
     save(fig, outdir, f"{set_name}_{model}_breakdown")
 
 
