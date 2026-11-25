@@ -11,7 +11,11 @@
 # rounds inside each power mode (interleaved, as in bench_fps.sh). The over-current
 # counters are read before and after every run; a run during which they
 # increased is marked throttled (kept, not dropped: see
-# docs/measurement-protocol.md).
+# docs/measurement-protocol.md). tegrastats runs alongside every run (every
+# TEGRA_MS ms), so the clocks the chip actually ran at can be checked against
+# the throttle events: the summary takes the samples where the GPU is busy
+# (GR3D load >= 50 %) and reports the GPU clock (min, median), the CPU clock,
+# the memory clock and the board's input power per run.
 #
 # On the Jetson, desktop stopped (it checks), over SSH or the text console:
 #     sudo systemctl isolate multi-user.target
@@ -29,6 +33,7 @@
 #                             give the median over the rounds
 #     KEEP_REPORTS=1          keep each nsys run's .nsys-rep (5-25 MB each);
 #                             0 deletes it once its FPS is read
+#     TEGRA_MS=200            tegrastats sampling interval in ms (default 200)
 #     FORCE=1                 rerun runs that are already done
 # Resumable: a run already in fps.csv is skipped, so after an interruption or
 # a reboot the same command continues where it stopped. If a mode needs a
@@ -45,6 +50,11 @@
 #     <mode>/<stage>_<profiler>_r<NN>.log  each run's own output
 #     <mode>/<stage>_nsys_r<NN>.nsys-rep   each nsys run's report (export to
 #                      .sqlite on the Jetson: nsys export --type=sqlite ...)
+#     <mode>/<stage>_<profiler>_r<NN>.tegrastats  each run's tegrastats log
+#     clocks.csv       per run: clocks and power while the GPU was busy, next
+#                      to the over-current events (from the tegrastats logs)
+#     clocks.md        per stage and power mode: median GPU clock of the busy
+#                      samples and its minimum, set clock, throttled runs
 # About 10-15 minutes per power mode per round without the profiler, and
 # roughly 25-35 minutes per power mode per round with both settings.
 set -euo pipefail
@@ -55,6 +65,7 @@ read -r -a STAGE_SEL <<<"${STAGES:-}"
 FORCE="${FORCE:-0}"
 read -r -a PROFILERS <<<"${PROFILERS:-plain nsys}"
 RUNS="${RUNS:-1}"
+TEGRA_MS="${TEGRA_MS:-200}"
 KEEP_REPORTS="${KEEP_REPORTS:-1}"
 NSYS="nsys profile --trace=cuda,nvtx --cuda-graph-trace=node --force-overwrite true"
 SRC="data/testdata.mkv"
@@ -75,6 +86,7 @@ for p in "${PROFILERS[@]}"; do
 done
 [[ "$RUNS" =~ ^[0-9]+$ ]] && (( RUNS > 0 )) || { echo "RUNS must be a positive number, got '$RUNS'"; exit 1; }
 [[ "$KEEP_REPORTS" == 0 || "$KEEP_REPORTS" == 1 ]] || { echo "KEEP_REPORTS must be 0 or 1"; exit 1; }
+[[ "$TEGRA_MS" =~ ^[0-9]+$ ]] && (( TEGRA_MS >= 100 )) || { echo "TEGRA_MS must be a number >= 100, got '$TEGRA_MS'"; exit 1; }
 
 # --- stages: name and command, in pipeline order ------------------------------
 NAMES=(); CMDS=()
@@ -130,7 +142,9 @@ fi
 sudo -v
 while sleep 50; do sudo -n true 2>/dev/null || exit; done &   # keep sudo alive
 KEEPALIVE=$!
-trap 'kill $KEEPALIVE 2>/dev/null || true' EXIT
+trap 'kill $KEEPALIVE 2>/dev/null || true; sudo -n tegrastats --stop >/dev/null 2>&1 || true' EXIT
+command -v tegrastats >/dev/null || { echo "tegrastats not found (it ships with JetPack)"; exit 1; }
+sudo tegrastats --stop >/dev/null 2>&1 || true   # a leftover instance would write into our logs
 
 mkdir -p "$OUT"
 HEADER="mode_id,mode,stage,profiler,run,fps,frames,seconds,oc_delta,throttled,started"
@@ -162,6 +176,8 @@ measure() {  # measure <mode-id> <stage-index> <profiler> <round>
         echo "  $name ($prof, round $r): done already, skipped"; return 0
     fi
     started="$(date -Is)"; oc0="$(oc_total)"
+    rm -f "$base.tegrastats"   # tegrastats appends; a rerun (FORCE=1) starts a fresh log
+    sudo tegrastats --interval "$TEGRA_MS" --logfile "$base.tegrastats" &
     # Word splitting of the command strings is intended (no quoted arguments in them).
     if [[ "$prof" == nsys ]]; then
         $NSYS -o "$base" ${CMDS[$i]} > "$log" 2>&1 || true
@@ -170,6 +186,8 @@ measure() {  # measure <mode-id> <stage-index> <profiler> <round>
         ${CMDS[$i]} > "$log" 2>&1 || true
     fi
     oc1="$(oc_total)"
+    sudo tegrastats --stop >/dev/null 2>&1 || true
+    wait $! 2>/dev/null || true
     local line fps="" frames="" secs="" throttled=0
     line="$(grep -E '^processed [0-9]+ frames in [0-9.]+s.*FPS' "$log" | tail -1 || true)"
     if [[ -n "$line" ]]; then
@@ -286,10 +304,90 @@ open(sys.argv[2], "w").write("\n".join(md) + "\n")
 print("\n" + "\n".join(md))
 EOF
 
+# --- clocks while the GPU was busy, per run, from the tegrastats logs ----------
+python3 - "$OUT" <<'EOF'
+import csv, re, statistics, sys
+from pathlib import Path
+out = Path(sys.argv[1])
+GPU = re.compile(r"GR3D_FREQ (\d+)%@\[(\d+)")
+CPU = re.compile(r"CPU \[([^\]]*)\]")
+EMC = re.compile(r"EMC_FREQ \d+%@(\d+)")
+VIN = re.compile(r"VDD_IN (\d+)mW")
+SET_GPU = re.compile(r"^=== mode \S+ (\S+)|^GPU MinFreq=(\d+)")
+# The clock each mode was pinned to, from session.log (the last entry per mode wins).
+pinned, cur = {}, None
+for line in (out / "session.log").read_text().splitlines() if (out / "session.log").exists() else []:
+    m = SET_GPU.search(line)
+    if m and m.group(1):
+        cur = m.group(1)
+    elif m and m.group(2) and cur:
+        pinned[cur] = int(m.group(2)) // 1_000_000
+rows = []
+for r in csv.DictReader(open(out / "fps.csv")):
+    tag = re.sub(r"[^a-z0-9]", "", r["mode"].lower())
+    log = out / tag / f"{r['stage']}_{r['profiler']}_r{int(r['run']):02d}.tegrastats"
+    gpu, cpu, emc, vin, n_all = [], [], [], [], 0
+    if log.exists():
+        for line in log.read_text().splitlines():
+            g = GPU.search(line)
+            if not g:
+                continue
+            n_all += 1
+            if int(g.group(1)) < 50:   # GPU idle: start-up, model load, end of run
+                continue
+            gpu.append(int(g.group(2)))
+            c = CPU.search(line)
+            if c:
+                f = [int(x.split("@")[1]) for x in c.group(1).split(",") if "@" in x]
+                if f:
+                    cpu.append(max(f))
+            e, v = EMC.search(line), VIN.search(line)
+            if e:
+                emc.append(int(e.group(1)))
+            if v:
+                vin.append(int(v.group(1)))
+    med = lambda v: round(statistics.median(v)) if v else ""
+    rows.append({"mode": r["mode"], "stage": r["stage"], "profiler": r["profiler"], "run": r["run"],
+                 "fps": r["fps"], "oc_delta": r["oc_delta"], "throttled": r["throttled"],
+                 "samples": n_all, "busy_samples": len(gpu), "gpu_mhz_pinned": pinned.get(r["mode"], ""),
+                 "gpu_mhz_median": med(gpu), "gpu_mhz_min": min(gpu) if gpu else "",
+                 "gpu_mhz_max": max(gpu) if gpu else "",
+                 "gpu_below_pinned_pct": round(100 * sum(g < 0.97 * pinned[r["mode"]] for g in gpu) / len(gpu), 1)
+                 if gpu and r["mode"] in pinned else "",
+                 "cpu_mhz_median": med(cpu), "emc_mhz_median": med(emc), "vdd_in_mw_median": med(vin)})
+if not any(r["samples"] for r in rows):
+    print("no tegrastats logs found (runs from before this script logged them)")
+    raise SystemExit
+keys = list(rows[0])
+with open(out / "clocks.csv", "w", newline="") as f:
+    w = csv.DictWriter(f, fieldnames=keys); w.writeheader(); w.writerows(rows)
+# One line per stage, power mode and profiler setting, over its runs.
+cells = {}
+for r in rows:
+    if r["busy_samples"]:
+        cells.setdefault((r["mode"], r["stage"], r["profiler"]), []).append(r)
+md = ["| Power mode | Stage | Profiler | Runs (throttled) | GPU clock set | GPU clock median | GPU clock min | "
+      "Busy samples > 3 % below set | Input power |", "|---|---|---|---|---|---|---|---|---|"]
+for (m, s, p), v in cells.items():
+    thr = sum(r["throttled"] == "1" for r in v)
+    below = [r["gpu_below_pinned_pct"] for r in v if r["gpu_below_pinned_pct"] != ""]
+    power = [r["vdd_in_mw_median"] for r in v if r["vdd_in_mw_median"] != ""]
+    md.append(f"| {m} | {s} | {p} | {len(v)} ({thr}) | {pinned.get(m, '–')} MHz "
+              f"| {round(statistics.median(r['gpu_mhz_median'] for r in v))} MHz "
+              f"| {min(r['gpu_mhz_min'] for r in v)} MHz "
+              f"| {str(max(below)) + ' %' if below else '–'} "
+              f"| {f'{statistics.median(power) / 1000:.1f} W' if power else '–'} |")
+md += ["", "Samples where the GPU was busy (GR3D load >= 50 %), every tegrastats interval of the run. "
+       "Busy samples > 3 % below set: the largest share over the runs, per run. "
+       "Input power: median VDD_IN of the busy samples."]
+(out / "clocks.md").write_text("\n".join(md) + "\n")
+print("\n" + "\n".join(md))
+EOF
+
 if [[ "$start_mode" != "$(sudo nvpmodel -q | tail -1 | tr -d ' ')" ]]; then
     echo; echo "Restoring the starting power mode $start_mode"
     echo no | sudo nvpmodel -m "$start_mode" || true
     echo "jetson_clocks is reset by the mode change: run sudo jetson_clocks if you need pinned clocks"
 fi
 echo
-echo "Commit with: git add -f $OUT/fps.csv $OUT/fps_table.md $SESSION"
+echo "Commit with: git add -f $OUT/fps.csv $OUT/fps_table.md $OUT/clocks.csv $OUT/clocks.md $SESSION"
